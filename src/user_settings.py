@@ -29,6 +29,7 @@ class UserSettings:
     output_format: str = DEFAULT_AUDIO_FORMAT_KEY
     audio_quality: str = DEFAULT_AUDIO_QUALITY_KEY
     theme: str = DEFAULT_THEME
+    check_updates_on_startup: bool = True
 
 
 class SettingsError(RuntimeError):
@@ -58,16 +59,25 @@ def load_user_settings(settings_path: Path | None = None) -> UserSettings:
         output_format = str(raw_data.get("output_format", "")).strip().lower()
         audio_quality = str(raw_data.get("audio_quality", "")).strip().lower()
         theme = str(raw_data.get("theme", DEFAULT_THEME)).strip().lower()
+        check_updates_on_startup = raw_data.get("check_updates_on_startup", True)
 
         # Estas claves se validan antes de que puedan llegar al descargador.
         get_audio_format(output_format)
         get_audio_quality(audio_quality)
         if theme not in VALID_THEMES:
             raise ValueError("Tema no compatible.")
+        if not isinstance(check_updates_on_startup, bool):
+            raise ValueError("Preferencia de actualizaciones no compatible.")
         if not output_directory:
             output_directory = str(DOWNLOADS_DIRECTORY)
 
-        return UserSettings(output_directory, output_format, audio_quality, theme)
+        return UserSettings(
+            output_directory,
+            output_format,
+            audio_quality,
+            theme,
+            check_updates_on_startup,
+        )
     except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError) as error:
         # Solo registramos errores del archivo real; las pruebas pueden usar otra ruta.
         if settings_path is None and path.exists():

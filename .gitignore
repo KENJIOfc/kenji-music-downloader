@@ -2,11 +2,32 @@
 .venv/
 venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
+*.pyc
 
 # Audios descargados (se conserva la carpeta vacía)
 downloads/*
 !downloads/.gitkeep
+*.mp3
+*.m4a
+*.aac
+*.opus
+*.webm
+*.wav
+*.flac
+*.ogg
+
+# Registros, temporales y credenciales locales
+*.log
+*.tmp
+*.temp
+*.part
+*.ytdl
+.env
+.env.*
+cookies.txt
+*.cookies
 
 # Resultados de PyInstaller
 build/

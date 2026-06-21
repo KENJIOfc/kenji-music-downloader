@@ -30,6 +30,7 @@ Versión actual: **v1.0.0**.
 - Permite abrir el último archivo descargado con el reproductor predeterminado.
 - Verifica `yt-dlp`, FFmpeg, FFprobe, carpeta de salida y conexión.
 - Incluye temas claro y oscuro y un registro local de errores.
+- Busca nuevas versiones mediante la API pública de GitHub Releases.
 - Ofrece menú de Archivo, Herramientas y Ayuda.
 - No incluye playlists ni instaladores de terceros.
 
@@ -55,8 +56,9 @@ predeterminada es **Media - 192 kbps**. WAV y FLAC no reciben un bitrate con
 pérdida: el selector se conserva como preferencia, pero no se aplica de forma
 incorrecta a esos formatos.
 
-La aplicación guarda automáticamente la última carpeta, formato, calidad y
-tema en un archivo JSON del perfil del usuario:
+La aplicación guarda automáticamente la última carpeta, formato, calidad,
+tema y preferencia de búsqueda de actualizaciones en un archivo JSON del
+perfil del usuario:
 
 - Windows: `%APPDATA%\KenjiMusicDownloader\settings.json`
 - Linux: `~/.config/kenji-music-downloader/settings.json` o la ruta indicada por
@@ -65,6 +67,47 @@ tema en un archivo JSON del perfil del usuario:
 El botón **Limpiar** no modifica estas preferencias ni borra archivos. El botón
 **Abrir carpeta** usa el explorador de archivos nativo del sistema y no ejecuta
 texto proporcionado por el usuario como comando.
+
+La ventana usa un tamaño fijo de `1000x750`. El botón de maximizar está
+deshabilitado para que campos, botones, historial y tabla conserven su
+distribución estable. Los controles normales de minimizar y cerrar permanecen
+disponibles.
+
+## Actualizaciones desde GitHub Releases
+
+**Ayuda > Buscar actualizaciones...** consulta en segundo plano la última
+release pública de
+[`KENJIOFC/kenji-music-downloader`](https://github.com/KENJIOFC/kenji-music-downloader/releases).
+La ventana permanece disponible mientras se realiza la consulta.
+
+La versión instalada se obtiene de la constante única `APP_VERSION` en
+`src/config.py`. Los tags aceptados usan el formato `vMAJOR.MINOR.PATCH` o
+`MAJOR.MINOR.PATCH`, por ejemplo:
+
+- versión local: `v1.0.0`;
+- release publicada: `v1.0.1`;
+- resultado: la aplicación avisa que existe una actualización.
+
+La opción **Ayuda > Buscar actualizaciones al iniciar** permite activar o
+desactivar la comprobación automática. Está activada de forma predeterminada y
+se guarda como `check_updates_on_startup` en `settings.json`. Al iniciar:
+
+- si existe una versión nueva, se muestra el aviso;
+- si ya está actualizado, no se interrumpe al usuario;
+- si falla la red o GitHub, el error se registra silenciosamente.
+
+Por ahora la aplicación **no descarga assets, no reemplaza el ejecutable y no
+se actualiza sola**. Si se detecta una versión nueva, ofrece abrir GitHub
+Releases en el navegador para que la descarga sea manual.
+
+Para que la detección funcione debe existir al menos una release publicada en
+GitHub. Si todavía no hay releases, la búsqueda manual muestra una explicación
+clara. Para probar el flujo:
+
+1. publica una release con tag `v1.0.0` y comprueba que la app indique que está
+   actualizada;
+2. publica después una release con tag `v1.0.1`;
+3. vuelve a buscar y la app ofrecerá abrir la página de Releases.
 
 ## Historial, herramientas y registro
 
@@ -307,6 +350,7 @@ kenji-music-downloader/
 │   ├── test_error_log.py
 │   ├── test_platform_utils.py
 │   ├── test_user_settings.py
+│   ├── test_updates.py
 │   └── test_security.py
 ├── scripts/
 │   └── build_linux.sh
@@ -328,7 +372,8 @@ kenji-music-downloader/
 - `src/download_history.py`: historial JSON persistente y limitado.
 - `src/diagnostics.py`: verificación de herramientas, carpeta y conexión.
 - `src/error_log.py`: registro local de errores importantes.
-- `src/updates.py`: punto de extensión para una futura búsqueda de actualizaciones.
+- `src/updates.py`: consulta GitHub Releases, compara versiones y conserva
+  metadatos de assets para una futura actualización automática.
 - `src/config.py`: versión, rutas portables y comprobación de FFmpeg.
 - `tests/test_security.py`: verifica que se acepten y rechacen los enlaces correctos.
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.

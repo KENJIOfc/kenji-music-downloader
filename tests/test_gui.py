@@ -8,7 +8,16 @@ from src.audio_formats import (
     DEFAULT_AUDIO_FORMAT_KEY,
     DEFAULT_AUDIO_QUALITY_KEY,
 )
-from src.gui import connection_delay_notice, format_bytes, format_eta, format_speed
+from src.gui import (
+    INITIAL_WINDOW_SIZE,
+    MINIMUM_WINDOW_SIZE,
+    WINDOW_RESIZABLE,
+    calculate_content_size,
+    connection_delay_notice,
+    format_bytes,
+    format_eta,
+    format_speed,
+)
 
 
 class GuiFormattingTests(unittest.TestCase):
@@ -50,3 +59,11 @@ class GuiFormattingTests(unittest.TestCase):
         level_90, message_90 = connection_delay_notice(90.0)
         self.assertEqual(level_90, 2)
         self.assertIn("Puedes cancelar e intentar de nuevo", message_90 or "")
+
+    def test_responsive_content_is_bounded_and_usable(self) -> None:
+        self.assertEqual(INITIAL_WINDOW_SIZE, (1000, 750))
+        self.assertEqual(MINIMUM_WINDOW_SIZE, (850, 650))
+        self.assertEqual(WINDOW_RESIZABLE, (False, False))
+        self.assertEqual(calculate_content_size(1000, 750), (968, 726))
+        self.assertEqual(calculate_content_size(850, 650), (818, 626))
+        self.assertEqual(calculate_content_size(3840, 2160), (1040, 850))

@@ -39,6 +39,7 @@ class UserSettingsTests(unittest.TestCase):
                 output_format="flac",
                 audio_quality="high",
                 theme="dark",
+                check_updates_on_startup=False,
             )
 
             save_user_settings(expected, settings_path)
@@ -69,7 +70,9 @@ class UserSettingsTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            self.assertEqual(load_user_settings(settings_path).theme, DEFAULT_THEME)
+            loaded = load_user_settings(settings_path)
+            self.assertEqual(loaded.theme, DEFAULT_THEME)
+            self.assertTrue(loaded.check_updates_on_startup)
 
     def test_unsupported_keys_return_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -107,6 +110,25 @@ class UserSettingsTests(unittest.TestCase):
 
             loaded = load_user_settings(settings_path)
             self.assertEqual(loaded.theme, DEFAULT_THEME)
+
+    def test_invalid_update_preference_returns_safe_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings_path = Path(temporary_directory) / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "output_directory": temporary_directory,
+                        "output_format": "mp3",
+                        "audio_quality": "medium",
+                        "theme": "light",
+                        "check_updates_on_startup": "yes",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = load_user_settings(settings_path)
+            self.assertTrue(loaded.check_updates_on_startup)
 
 
 if __name__ == "__main__":
