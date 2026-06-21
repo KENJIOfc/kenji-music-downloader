@@ -2,6 +2,7 @@
 
 import unittest
 
+from src.audio_formats import AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT_KEY
 from src.gui import connection_delay_notice, format_bytes, format_eta, format_speed
 
 
@@ -12,6 +13,15 @@ class GuiFormattingTests(unittest.TestCase):
         self.assertEqual(format_bytes(1536), "1.5 KB")
         self.assertEqual(format_speed(2048), "2.0 KB/s")
         self.assertEqual(format_bytes(None), "—")
+
+    def test_mp3_is_default_and_all_labels_are_clear(self) -> None:
+        self.assertEqual(DEFAULT_AUDIO_FORMAT_KEY, "mp3")
+        self.assertEqual(AUDIO_FORMATS[0].key, "mp3")
+        self.assertEqual(
+            [audio_format.key for audio_format in AUDIO_FORMATS],
+            ["mp3", "m4a", "opus", "wav", "flac", "ogg"],
+        )
+        self.assertTrue(all(" - " in item.selector_label for item in AUDIO_FORMATS))
 
     def test_formats_eta(self) -> None:
         self.assertEqual(format_eta(65), "01:05")

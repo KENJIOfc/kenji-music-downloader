@@ -7,6 +7,7 @@ from time import perf_counter
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+from src.audio_formats import AUDIO_FORMATS, get_audio_format_from_label
 from src.config import (
     APP_NAME,
     DOWNLOADS_DIRECTORY,
@@ -105,6 +106,7 @@ class KenjiMusicDownloaderGUI:
 
         self.url_value = tk.StringVar()
         self.output_value = tk.StringVar(value=str(DOWNLOADS_DIRECTORY))
+        self.format_value = tk.StringVar(value=AUDIO_FORMATS[0].selector_label)
         self.status_value = tk.StringVar(value="Listo para descargar.")
         self.percentage_value = tk.StringVar(value="0 %")
         self.video_title_value = tk.StringVar(value="Esperando información...")
@@ -124,8 +126,8 @@ class KenjiMusicDownloaderGUI:
     def _configure_window(self) -> None:
         """Configura tamaño, título y comportamiento general de la ventana."""
         self.root.title(APP_NAME)
-        self.root.geometry("760x555")
-        self.root.minsize(660, 510)
+        self.root.geometry("760x620")
+        self.root.minsize(660, 570)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_widgets(self) -> None:
@@ -145,7 +147,7 @@ class KenjiMusicDownloaderGUI:
 
         subtitle = ttk.Label(
             container,
-            text="Descarga el audio de un video individual de YouTube como MP3.",
+            text="Descarga el audio de un video individual de YouTube.",
         )
         subtitle.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 20))
 
@@ -174,8 +176,25 @@ class KenjiMusicDownloaderGUI:
         )
         self.folder_button.grid(row=5, column=1, padx=(10, 0), pady=(6, 18))
 
+        ttk.Label(container, text="Formato de salida:").grid(
+            row=6, column=0, columnspan=2, sticky="w"
+        )
+        self.format_selector = ttk.Combobox(
+            container,
+            textvariable=self.format_value,
+            values=[audio_format.selector_label for audio_format in AUDIO_FORMATS],
+            state="readonly",
+        )
+        self.format_selector.grid(
+            row=7,
+            column=0,
+            columnspan=2,
+            sticky="ew",
+            pady=(6, 18),
+        )
+
         progress_row = ttk.Frame(container)
-        progress_row.grid(row=6, column=0, columnspan=2, sticky="ew")
+        progress_row.grid(row=8, column=0, columnspan=2, sticky="ew")
         progress_row.columnconfigure(0, weight=1)
         self.progress_bar = ttk.Progressbar(
             progress_row,
@@ -188,7 +207,7 @@ class KenjiMusicDownloaderGUI:
         )
 
         details = ttk.LabelFrame(container, text="Detalles del proceso", padding=12)
-        details.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(14, 18))
+        details.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(14, 18))
         details.columnconfigure(1, weight=1)
         details.columnconfigure(3, weight=1)
         details.columnconfigure(5, weight=1)
@@ -230,12 +249,12 @@ class KenjiMusicDownloaderGUI:
         ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(8, 0), pady=(10, 0))
 
         actions = ttk.Frame(container)
-        actions.grid(row=8, column=0, columnspan=2, sticky="ew")
+        actions.grid(row=10, column=0, columnspan=2, sticky="ew")
         actions.columnconfigure(0, weight=1)
 
         self.download_button = ttk.Button(
             actions,
-            text="Descargar MP3",
+            text="Descargar audio",
             command=self._start_download,
         )
         self.download_button.grid(row=0, column=0, sticky="ew")
@@ -271,6 +290,12 @@ class KenjiMusicDownloaderGUI:
             )
             return
 
+        try:
+            audio_format = get_audio_format_from_label(self.format_value.get())
+        except ValueError as error:
+            messagebox.showerror("Formato no válido", str(error), parent=self.root)
+            return
+
         self.cancel_event = threading.Event()
         self.cancel_requested = False
         self.current_stage = "validating"
@@ -291,6 +316,7 @@ class KenjiMusicDownloaderGUI:
         self._launch_download_worker(
             raw_url,
             Path(output_text),
+            audio_format.key,
             perf_counter(),
             self.cancel_event,
         )
@@ -299,6 +325,7 @@ class KenjiMusicDownloaderGUI:
         self,
         raw_url: str,
         output_directory: Path,
+        output_format: str,
         operation_started_at: float,
         cancel_event: threading.Event,
     ) -> None:
@@ -306,7 +333,13 @@ class KenjiMusicDownloaderGUI:
 
         worker = threading.Thread(
             target=self._download_worker,
-            args=(raw_url, output_directory, operation_started_at, cancel_event),
+            args=(
+                raw_url,
+                output_directory,
+                output_format,
+                operation_started_at,
+                cancel_event,
+            ),
             daemon=True,
         )
         worker.start()
@@ -315,6 +348,7 @@ class KenjiMusicDownloaderGUI:
         self,
         raw_url: str,
         output_directory: Path,
+        output_format: str,
         operation_started_at: float,
         cancel_event: threading.Event,
     ) -> None:
@@ -343,8 +377,9 @@ class KenjiMusicDownloaderGUI:
                 progress_callback=lambda value: self.events.put(("progress", value)),
                 timing_callback=lambda metric: self.events.put(("timing", metric)),
                 cancel_event=cancel_event,
+                output_format=output_format,
             )
-            output_path = downloader.download_mp3(safe_url)
+            output_path = downloader.download_audio(safe_url)
         except DownloadCancelledError:
             result_event: GuiEvent = ("cancelled", None)
         except InvalidYouTubeURLError as error:
@@ -412,6 +447,10 @@ class KenjiMusicDownloaderGUI:
             "Descarga completada.": "completed",
         }
         stage = stages.get(message)
+        if message.startswith("Convirtiendo a "):
+            stage = "converting"
+        elif message.startswith("Guardando archivo "):
+            stage = "saving"
         if stage:
             self.current_stage = stage
         if stage == "connecting" and self.connection_started_at is None:
@@ -491,9 +530,10 @@ class KenjiMusicDownloaderGUI:
         self.status_value.set("Descarga completada.")
         self.speed_value.set("—")
         self.eta_value.set("00:00")
+        format_name = output_path.suffix.removeprefix(".").upper()
         messagebox.showinfo(
             "Descarga completada",
-            f"El MP3 se guardó en:\n{output_path}",
+            f"El archivo {format_name} se guardó en:\n{output_path}",
             parent=self.root,
         )
 
@@ -548,6 +588,7 @@ class KenjiMusicDownloaderGUI:
         self.download_button.configure(state="disabled" if busy else "normal")
         self.folder_button.configure(state="disabled" if busy else "normal")
         self.url_entry.configure(state="disabled" if busy else "normal")
+        self.format_selector.configure(state="disabled" if busy else "readonly")
         self.cancel_button.configure(
             state="normal" if busy and not self.cancel_requested else "disabled"
         )

@@ -5,9 +5,12 @@ import tempfile
 from threading import Event
 import unittest
 from unittest.mock import patch
+from yt_dlp.utils import DownloadError as YtDlpDownloadError
 
+from src.audio_formats import AUDIO_FORMATS
 from src.downloader import (
     AudioDownloader,
+    AudioDownloadError,
     DownloadCancelledError,
     DownloadProgress,
     TimingMetric,
@@ -93,7 +96,16 @@ class FakeYoutubeDL:
         self.cancel_check = cancel_check
         output_directory = Path(options["outtmpl"]).parent
         self.original_path = output_directory / "Video de prueba.webm"
-        self.mp3_path = self.original_path.with_suffix(".mp3")
+        codec = options["postprocessors"][0]["preferredcodec"]
+        extension = {
+            "mp3": "mp3",
+            "m4a": "m4a",
+            "opus": "opus",
+            "wav": "wav",
+            "flac": "flac",
+            "vorbis": "ogg",
+        }[codec]
+        self.converted_path = self.original_path.with_suffix(f".{extension}")
 
     def __enter__(self) -> "FakeYoutubeDL":
         return self
@@ -132,11 +144,19 @@ class FakeYoutubeDL:
             }
         )
         self.options["postprocessor_hooks"][0]({"status": "started"})
-        self.mp3_path.write_bytes(b"MP3 simulado")
+        self.converted_path.write_bytes(b"Audio simulado")
         return info
 
     def prepare_filename(self, _info: dict) -> str:
         return str(self.original_path)
+
+
+class FailingFFmpegYoutubeDL(FakeYoutubeDL):
+    """Simula un fallo controlado durante la conversión."""
+
+    def extract_info(self, _url: str, download: bool) -> dict:
+        del download
+        raise YtDlpDownloadError("FFmpeg conversion failed")
 
 
 class DownloadFlowTests(unittest.TestCase):
@@ -176,7 +196,7 @@ class DownloadFlowTests(unittest.TestCase):
                     "Conectando con YouTube...",
                     "Descargando audio...",
                     "Convirtiendo a MP3...",
-                    "Guardando archivo...",
+                    "Guardando archivo MP3...",
                     "Descarga completada.",
                 ],
             )
@@ -256,6 +276,56 @@ class DownloadFlowTests(unittest.TestCase):
                     for path in Path(temporary_directory).iterdir()
                 )
             )
+
+    @patch("src.downloader.CancellableYoutubeDL", FakeYoutubeDL)
+    def test_all_supported_output_formats(self) -> None:
+        for audio_format in AUDIO_FORMATS:
+            with self.subTest(audio_format=audio_format.key):
+                with tempfile.TemporaryDirectory() as temporary_directory:
+                    statuses: list[str] = []
+                    downloader = AudioDownloader(
+                        Path(temporary_directory),
+                        status_callback=statuses.append,
+                        output_format=audio_format.key,
+                    )
+
+                    result = downloader.download_audio(
+                        "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                    )
+
+                    self.assertEqual(result.suffix, f".{audio_format.extension}")
+                    self.assertEqual(result.name, f"Video de prueba.{audio_format.extension}")
+                    self.assertIn(
+                        f"Convirtiendo a {audio_format.display_name}...",
+                        statuses,
+                    )
+                    self.assertIn(
+                        f"Guardando archivo {audio_format.display_name}...",
+                        statuses,
+                    )
+                    options = FakeYoutubeDL.last_options
+                    assert options is not None
+                    self.assertEqual(
+                        options["postprocessors"][0]["preferredcodec"],
+                        audio_format.yt_dlp_codec,
+                    )
+
+    def test_rejects_unknown_output_format(self) -> None:
+        with self.assertRaises(AudioDownloadError):
+            AudioDownloader(Path("downloads"), output_format="exe")
+
+    @patch("src.downloader.CancellableYoutubeDL", FailingFFmpegYoutubeDL)
+    def test_ffmpeg_error_mentions_selected_format(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            downloader = AudioDownloader(
+                Path(temporary_directory),
+                output_format="flac",
+            )
+
+            with self.assertRaisesRegex(AudioDownloadError, "FLAC"):
+                downloader.download_audio(
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                )
 
 
 class DownloadCancellationTests(unittest.TestCase):

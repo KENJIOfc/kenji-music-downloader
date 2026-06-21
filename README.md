@@ -1,8 +1,9 @@
 # Kenji Music Downloader
 
 Aplicación de escritorio para descargar el audio de un video individual de
-YouTube y convertirlo a MP3. Está escrita en Python, ofrece una interfaz gráfica
-con Tkinter, usa la API de `yt-dlp` y delega la conversión a FFmpeg.
+YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
+interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
+FFmpeg.
 
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
@@ -20,7 +21,7 @@ con Tkinter, usa la API de `yt-dlp` y delega la conversión a FFmpeg.
 - Obtiene la información y descarga en una sola ejecución de `yt-dlp`.
 - No solicita miniaturas, comentarios, subtítulos, descripciones ni archivos JSON.
 - Permite cancelar una operación lenta sin bloquear ni cerrar la ventana.
-- Guarda como `Título.mp3`, sin ID de YouTube; si existe, usa `Título (1).mp3`.
+- Guarda como `Título.ext`, sin ID de YouTube; si existe, usa `Título (1).ext`.
 - No incluye historial, playlists ni instaladores de terceros.
 
 ## Requisitos
@@ -30,6 +31,13 @@ con Tkinter, usa la API de `yt-dlp` y delega la conversión a FFmpeg.
 - FFmpeg disponible en el `PATH` del sistema.
 - `yt-dlp-ejs` y Deno, instalados automáticamente mediante `requirements.txt`.
 - Conexión a Internet durante las descargas.
+
+## Formatos de audio
+
+El selector ofrece MP3 (predeterminado), M4A/AAC, OPUS, WAV, FLAC y OGG. Todos
+conservan el nombre limpio y la extensión correspondiente. WAV y FLAC evitan
+pérdidas adicionales durante la conversión, pero no recuperan información que
+ya haya sido comprimida por la fuente de YouTube.
 
 ## Probar en Windows
 
@@ -218,7 +226,8 @@ kenji-music-downloader/
 - `src/gui.py`: ventana, selección de carpeta, progreso y mensajes al usuario.
 - `src/main.py`: versión alternativa por consola.
 - `src/security.py`: valida el dominio y extrae un identificador de video seguro.
-- `src/downloader.py`: descarga audio y lo convierte a MP3 mediante `yt-dlp` y FFmpeg.
+- `src/downloader.py`: descarga y convierte al formato elegido mediante `yt-dlp` y FFmpeg.
+- `src/audio_formats.py`: catálogo permitido de formatos, códecs y extensiones.
 - `src/config.py`: rutas portables, carpeta de salida y comprobación de FFmpeg.
 - `tests/test_security.py`: verifica que se acepten y rechacen los enlaces correctos.
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.

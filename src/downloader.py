@@ -12,6 +12,7 @@ from time import perf_counter
 import yt_dlp
 from yt_dlp.utils import DownloadError as YtDlpDownloadError
 
+from src.audio_formats import DEFAULT_AUDIO_FORMAT_KEY, AudioFormat, get_audio_format
 from src.config import FORCE_IPV4, SOCKET_TIMEOUT_SECONDS
 
 
@@ -131,6 +132,7 @@ class AudioDownloader:
         cancel_event: Event | None = None,
         force_ipv4: bool = FORCE_IPV4,
         socket_timeout: float = SOCKET_TIMEOUT_SECONDS,
+        output_format: str = DEFAULT_AUDIO_FORMAT_KEY,
     ) -> None:
         self.output_directory = output_directory
         self.status_callback = status_callback
@@ -139,6 +141,10 @@ class AudioDownloader:
         self.cancel_event = cancel_event
         self.force_ipv4 = force_ipv4
         self.socket_timeout = max(1.0, float(socket_timeout))
+        try:
+            self.audio_format: AudioFormat = get_audio_format(output_format)
+        except ValueError as error:
+            raise AudioDownloadError(str(error)) from error
         self._last_status: str | None = None
         self._detected_title: str | None = None
         self._last_progress: DownloadProgress | None = None
@@ -252,7 +258,7 @@ class AudioDownloader:
             if total is None and previous and previous.total_bytes is not None:
                 total = float(previous.total_bytes)
             total = total or downloaded
-            self._notify("Convirtiendo a MP3...")
+            self._notify(f"Convirtiendo a {self.audio_format.display_name}...")
             self._notify_progress(
                 DownloadProgress(
                     stage="converting",
@@ -268,10 +274,12 @@ class AudioDownloader:
         self._check_cancelled()
 
     def _move_to_unique_output(self, source_path: Path) -> Path:
-        """Mueve el MP3 sin sobrescribir y agrega un número solo si hace falta."""
+        """Mueve el audio sin sobrescribir y agrega un número solo si hace falta."""
         for number in range(10_000):
             suffix = "" if number == 0 else f" ({number})"
-            candidate = self.output_directory / f"{source_path.stem}{suffix}.mp3"
+            candidate = self.output_directory / (
+                f"{source_path.stem}{suffix}.{self.audio_format.extension}"
+            )
             try:
                 # Reserva atómicamente el nombre para evitar sobrescrituras accidentales.
                 with candidate.open("xb"):
@@ -287,17 +295,17 @@ class AudioDownloader:
             return candidate
 
         raise AudioDownloadError(
-            "No se encontró un nombre disponible para guardar el archivo MP3."
+            "No se encontró un nombre disponible para guardar el archivo de audio."
         )
 
-    def download_mp3(self, safe_url: str) -> Path:
-        """Descarga en un área temporal y guarda un MP3 con nombre único."""
+    def download_audio(self, safe_url: str) -> Path:
+        """Descarga en un área temporal y guarda el formato seleccionado."""
         try:
             with TemporaryDirectory(
                 prefix=".kenji-",
                 dir=self.output_directory,
             ) as working_directory:
-                return self._download_mp3_in_directory(
+                return self._download_audio_in_directory(
                     safe_url,
                     Path(working_directory),
                 )
@@ -308,7 +316,11 @@ class AudioDownloader:
                 "No se pudo escribir el archivo. Revisa los permisos y el espacio disponible."
             ) from error
 
-    def _download_mp3_in_directory(
+    def download_mp3(self, safe_url: str) -> Path:
+        """Mantiene compatibilidad con la versión anterior, cuyo valor es MP3."""
+        return self.download_audio(safe_url)
+
+    def _download_audio_in_directory(
         self,
         safe_url: str,
         working_directory: Path,
@@ -317,6 +329,13 @@ class AudioDownloader:
         output_template = str(
             working_directory / "%(title).150B.%(ext)s"
         )
+        postprocessor = {
+            "key": "FFmpegExtractAudio",
+            "preferredcodec": self.audio_format.yt_dlp_codec,
+        }
+        if self.audio_format.preferred_quality:
+            postprocessor["preferredquality"] = self.audio_format.preferred_quality
+
         ydl_options = {
             "format": "bestaudio/best",
             "outtmpl": output_template,
@@ -340,13 +359,7 @@ class AudioDownloader:
             "no_warnings": True,
             "progress_hooks": [self._progress_hook],
             "postprocessor_hooks": [self._postprocessor_hook],
-            "postprocessors": [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": "mp3",
-                    "preferredquality": "192",
-                }
-            ],
+            "postprocessors": [postprocessor],
         }
 
         if self.force_ipv4:
@@ -397,7 +410,9 @@ class AudioDownloader:
                     if isinstance(title, str) and title.strip():
                         self._detected_title = title.strip()
                 original_path = Path(ydl.prepare_filename(info))
-                mp3_path = original_path.with_suffix(".mp3")
+                converted_path = original_path.with_suffix(
+                    f".{self.audio_format.extension}"
+                )
         except DownloadCancelledError:
             raise
         except YtDlpDownloadError as error:
@@ -405,19 +420,26 @@ class AudioDownloader:
                 raise DownloadCancelledError(
                     "La descarga fue cancelada por el usuario."
                 ) from error
+            if "ffmpeg" in str(error).lower():
+                raise AudioDownloadError(
+                    f"FFmpeg no pudo convertir el audio a "
+                    f"{self.audio_format.display_name}. Comprueba que FFmpeg esté "
+                    "instalado correctamente."
+                ) from error
             raise AudioDownloadError(_friendly_error_message(error)) from error
         except OSError as error:
             raise AudioDownloadError(
                 "No se pudo escribir el archivo. Revisa los permisos y el espacio disponible."
             ) from error
 
-        if not mp3_path.is_file():
+        if not converted_path.is_file():
             raise AudioDownloadError(
-                "La descarga terminó, pero no se encontró el archivo MP3 resultante."
+                "La conversión terminó, pero no se encontró el archivo "
+                f"{self.audio_format.display_name} resultante."
             )
 
         previous = self._last_progress
-        self._notify("Guardando archivo...")
+        self._notify(f"Guardando archivo {self.audio_format.display_name}...")
         self._notify_progress(
             DownloadProgress(
                 stage="saving",
@@ -428,7 +450,7 @@ class AudioDownloader:
                 title=self._detected_title,
             )
         )
-        final_path = self._move_to_unique_output(mp3_path)
+        final_path = self._move_to_unique_output(converted_path)
 
         self._notify("Descarga completada.")
         self._notify_progress(
