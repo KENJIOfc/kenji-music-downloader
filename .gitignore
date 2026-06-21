@@ -1,0 +1,19 @@
+# Entornos virtuales y archivos de Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Audios descargados (se conserva la carpeta vacía)
+downloads/*
+!downloads/.gitkeep
+
+# Resultados de PyInstaller
+build/
+dist/
+
+# Configuración de editores y sistema operativo
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
