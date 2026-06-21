@@ -309,10 +309,43 @@ class DownloadFlowTests(unittest.TestCase):
                         options["postprocessors"][0]["preferredcodec"],
                         audio_format.yt_dlp_codec,
                     )
+                    if audio_format.supports_bitrate:
+                        self.assertEqual(
+                            options["postprocessors"][0]["preferredquality"],
+                            "192",
+                        )
+                    else:
+                        self.assertNotIn(
+                            "preferredquality",
+                            options["postprocessors"][0],
+                        )
+
+    @patch("src.downloader.CancellableYoutubeDL", FakeYoutubeDL)
+    def test_selected_quality_is_passed_to_lossy_conversion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            downloader = AudioDownloader(
+                Path(temporary_directory),
+                output_format="mp3",
+                audio_quality="maximum",
+            )
+            downloader.download_audio(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+            )
+
+            options = FakeYoutubeDL.last_options
+            assert options is not None
+            self.assertEqual(
+                options["postprocessors"][0]["preferredquality"],
+                "320",
+            )
 
     def test_rejects_unknown_output_format(self) -> None:
         with self.assertRaises(AudioDownloadError):
             AudioDownloader(Path("downloads"), output_format="exe")
+
+    def test_rejects_unknown_audio_quality(self) -> None:
+        with self.assertRaises(AudioDownloadError):
+            AudioDownloader(Path("downloads"), audio_quality="ultra")
 
     @patch("src.downloader.CancellableYoutubeDL", FailingFFmpegYoutubeDL)
     def test_ffmpeg_error_mentions_selected_format(self) -> None:

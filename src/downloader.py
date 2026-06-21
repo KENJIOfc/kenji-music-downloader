@@ -9,10 +9,23 @@ from tempfile import TemporaryDirectory
 from threading import Event
 from time import perf_counter
 
-import yt_dlp
-from yt_dlp.utils import DownloadError as YtDlpDownloadError
+try:
+    import yt_dlp
+    from yt_dlp.utils import DownloadError as YtDlpDownloadError
+except ModuleNotFoundError:
+    yt_dlp = None
 
-from src.audio_formats import DEFAULT_AUDIO_FORMAT_KEY, AudioFormat, get_audio_format
+    class YtDlpDownloadError(Exception):
+        """Sustituto mínimo para presentar un error entendible en la GUI."""
+
+from src.audio_formats import (
+    DEFAULT_AUDIO_FORMAT_KEY,
+    DEFAULT_AUDIO_QUALITY_KEY,
+    AudioFormat,
+    AudioQuality,
+    get_audio_format,
+    get_audio_quality,
+)
 from src.config import FORCE_IPV4, SOCKET_TIMEOUT_SECONDS
 
 
@@ -71,16 +84,26 @@ class DownloadCancelledError(RuntimeError):
     """Indica una cancelación solicitada por el usuario."""
 
 
-class CancellableYoutubeDL(yt_dlp.YoutubeDL):
-    """YoutubeDL que revisa una señal antes de iniciar cada petición HTTP."""
+if yt_dlp is not None:
+    class CancellableYoutubeDL(yt_dlp.YoutubeDL):
+        """YoutubeDL que revisa una señal antes de cada petición HTTP."""
 
-    def __init__(self, params: dict, cancel_check: Callable[[], None]) -> None:
-        self._cancel_check = cancel_check
-        super().__init__(params)
+        def __init__(self, params: dict, cancel_check: Callable[[], None]) -> None:
+            self._cancel_check = cancel_check
+            super().__init__(params)
 
-    def urlopen(self, request):
-        self._cancel_check()
-        return super().urlopen(request)
+        def urlopen(self, request):
+            self._cancel_check()
+            return super().urlopen(request)
+else:
+    class CancellableYoutubeDL:
+        """Explica la dependencia ausente sin cerrar inesperadamente la GUI."""
+
+        def __init__(self, _params: dict, _cancel_check: Callable[[], None]) -> None:
+            raise AudioDownloadError(
+                "yt-dlp no fue encontrado. Instala las dependencias con "
+                "'python -m pip install -r requirements.txt'."
+            )
 
 
 def _friendly_error_message(error: Exception) -> str:
@@ -133,6 +156,7 @@ class AudioDownloader:
         force_ipv4: bool = FORCE_IPV4,
         socket_timeout: float = SOCKET_TIMEOUT_SECONDS,
         output_format: str = DEFAULT_AUDIO_FORMAT_KEY,
+        audio_quality: str = DEFAULT_AUDIO_QUALITY_KEY,
     ) -> None:
         self.output_directory = output_directory
         self.status_callback = status_callback
@@ -143,6 +167,7 @@ class AudioDownloader:
         self.socket_timeout = max(1.0, float(socket_timeout))
         try:
             self.audio_format: AudioFormat = get_audio_format(output_format)
+            self.audio_quality: AudioQuality = get_audio_quality(audio_quality)
         except ValueError as error:
             raise AudioDownloadError(str(error)) from error
         self._last_status: str | None = None
@@ -333,8 +358,11 @@ class AudioDownloader:
             "key": "FFmpegExtractAudio",
             "preferredcodec": self.audio_format.yt_dlp_codec,
         }
-        if self.audio_format.preferred_quality:
-            postprocessor["preferredquality"] = self.audio_format.preferred_quality
+        if self.audio_format.supports_bitrate:
+            # WAV y FLAC no reciben un bitrate con pérdida; conservan su naturaleza.
+            postprocessor["preferredquality"] = str(
+                self.audio_quality.bitrate_kbps
+            )
 
         ydl_options = {
             "format": "bestaudio/best",
@@ -420,11 +448,19 @@ class AudioDownloader:
                 raise DownloadCancelledError(
                     "La descarga fue cancelada por el usuario."
                 ) from error
-            if "ffmpeg" in str(error).lower():
+            technical_message = str(error).lower()
+            if any(
+                text in technical_message
+                for text in (
+                    "ffmpeg",
+                    "postprocessing",
+                    "conversion failed",
+                    "unable to convert",
+                )
+            ):
                 raise AudioDownloadError(
-                    f"FFmpeg no pudo convertir el audio a "
-                    f"{self.audio_format.display_name}. Comprueba que FFmpeg esté "
-                    "instalado correctamente."
+                    f"El formato {self.audio_format.display_name} seleccionado no pudo "
+                    "convertirse. Comprueba que FFmpeg esté instalado correctamente."
                 ) from error
             raise AudioDownloadError(_friendly_error_message(error)) from error
         except OSError as error:

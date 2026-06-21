@@ -7,12 +7,39 @@ from time import perf_counter
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
-from src.audio_formats import AUDIO_FORMATS, get_audio_format_from_label
+from src.audio_formats import (
+    AUDIO_FORMATS,
+    AUDIO_QUALITIES,
+    AudioFormat,
+    AudioQuality,
+    get_audio_format,
+    get_audio_format_from_label,
+    get_audio_quality,
+    get_audio_quality_from_label,
+)
+from src.diagnostics import ToolCheckResult, verify_tools
+from src.download_history import (
+    DownloadHistoryEntry,
+    HistoryError,
+    add_history_entry,
+    clear_download_history,
+    load_download_history,
+    remove_history_entry,
+)
+from src.error_log import ErrorLogReadError, log_error, read_error_log
 from src.config import (
+    APP_DESCRIPTION,
     APP_NAME,
+    APP_VERSION,
     DOWNLOADS_DIRECTORY,
     ConfigurationError,
     prepare_environment,
+)
+from src.platform_utils import (
+    OpenDirectoryError,
+    OpenFileError,
+    open_directory,
+    open_file,
 )
 from src.downloader import (
     AudioDownloader,
@@ -22,6 +49,15 @@ from src.downloader import (
     TimingMetric,
 )
 from src.security import InvalidYouTubeURLError, validate_and_normalize_youtube_url
+from src.updates import check_for_updates
+from src.user_settings import (
+    DEFAULT_THEME,
+    SettingsError,
+    UserSettings,
+    VALID_THEMES,
+    load_user_settings,
+    save_user_settings,
+)
 
 
 GuiEvent = tuple[str, object]
@@ -38,6 +74,26 @@ TIMING_ORDER = (
     "conversion",
     "total",
 )
+THEME_PALETTES = {
+    "light": {
+        "background": "#f4f6f9",
+        "surface": "#ffffff",
+        "foreground": "#1f2937",
+        "muted": "#5f6b7a",
+        "accent": "#2563eb",
+        "selected": "#dbeafe",
+        "border": "#cbd5e1",
+    },
+    "dark": {
+        "background": "#171a21",
+        "surface": "#232832",
+        "foreground": "#f3f4f6",
+        "muted": "#b8c0cc",
+        "accent": "#60a5fa",
+        "selected": "#334a68",
+        "border": "#46505f",
+    },
+}
 
 
 def format_bytes(value: int | float | None) -> str:
@@ -103,10 +159,24 @@ class KenjiMusicDownloaderGUI:
         self.current_stage = "idle"
         self.connection_started_at: float | None = None
         self.connection_warning_level = 0
+        self.last_downloaded_path: Path | None = None
+        self.active_audio_format: AudioFormat | None = None
+        self.active_audio_quality: AudioQuality | None = None
+        self.active_download_name = "Descarga sin título"
+        self.tools_check_running = False
+        self.style = ttk.Style(self.root)
+        self.managed_menus: list[tk.Menu] = []
+        self.history_item_entries: dict[str, DownloadHistoryEntry] = {}
+
+        saved_settings = load_user_settings()
+        saved_format = get_audio_format(saved_settings.output_format)
+        saved_quality = get_audio_quality(saved_settings.audio_quality)
 
         self.url_value = tk.StringVar()
-        self.output_value = tk.StringVar(value=str(DOWNLOADS_DIRECTORY))
-        self.format_value = tk.StringVar(value=AUDIO_FORMATS[0].selector_label)
+        self.output_value = tk.StringVar(value=saved_settings.output_directory)
+        self.format_value = tk.StringVar(value=saved_format.selector_label)
+        self.quality_value = tk.StringVar(value=saved_quality.selector_label)
+        self.theme_value = tk.StringVar(value=saved_settings.theme)
         self.status_value = tk.StringVar(value="Listo para descargar.")
         self.percentage_value = tk.StringVar(value="0 %")
         self.video_title_value = tk.StringVar(value="Esperando información...")
@@ -115,8 +185,17 @@ class KenjiMusicDownloaderGUI:
         self.eta_value = tk.StringVar(value="—")
         self.timings_value = tk.StringVar(value="Esperando una descarga...")
 
+        try:
+            self.history_entries = load_download_history()
+        except HistoryError as error:
+            self.history_entries = []
+            log_error("Historial", str(error), error)
+
         self._configure_window()
         self._build_widgets()
+        self._build_menu()
+        self._apply_theme(saved_settings.theme, save_preference=False)
+        self._refresh_history_tree()
         self.root.after(EVENT_POLL_INTERVAL_MS, self._process_events)
         self.root.after(
             CONNECTION_MONITOR_INTERVAL_MS,
@@ -126,8 +205,8 @@ class KenjiMusicDownloaderGUI:
     def _configure_window(self) -> None:
         """Configura tamaño, título y comportamiento general de la ventana."""
         self.root.title(APP_NAME)
-        self.root.geometry("760x620")
-        self.root.minsize(660, 570)
+        self.root.geometry("960x800")
+        self.root.minsize(780, 700)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_widgets(self) -> None:
@@ -137,30 +216,46 @@ class KenjiMusicDownloaderGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
         container.columnconfigure(0, weight=1)
+        container.rowconfigure(9, weight=1)
 
         title = ttk.Label(
             container,
             text=APP_NAME,
             font=("TkDefaultFont", 18, "bold"),
         )
-        title.grid(row=0, column=0, columnspan=2, sticky="w")
+        title.grid(row=0, column=0, columnspan=3, sticky="w")
 
         subtitle = ttk.Label(
             container,
             text="Descarga el audio de un video individual de YouTube.",
         )
-        subtitle.grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 20))
+        subtitle.grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 20))
 
         ttk.Label(container, text="Enlace de YouTube:").grid(
-            row=2, column=0, columnspan=2, sticky="w"
+            row=2, column=0, columnspan=3, sticky="w"
         )
-        self.url_entry = ttk.Entry(container, textvariable=self.url_value)
-        self.url_entry.grid(
-            row=3, column=0, columnspan=2, sticky="ew", pady=(6, 16)
+        url_row = ttk.Frame(container)
+        url_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 16))
+        url_row.columnconfigure(0, weight=1)
+        self.url_entry = ttk.Entry(url_row, textvariable=self.url_value)
+        self.url_entry.grid(row=0, column=0, sticky="ew")
+        self.paste_button = ttk.Button(
+            url_row,
+            text="Pegar enlace",
+            command=self._paste_link,
+            width=14,
         )
+        self.paste_button.grid(row=0, column=1, padx=(10, 0))
+        self.clear_button = ttk.Button(
+            url_row,
+            text="Limpiar",
+            command=self._clear_interface,
+            width=12,
+        )
+        self.clear_button.grid(row=0, column=2, padx=(8, 0))
 
         ttk.Label(container, text="Carpeta de salida:").grid(
-            row=4, column=0, columnspan=2, sticky="w"
+            row=4, column=0, columnspan=3, sticky="w"
         )
         self.output_entry = ttk.Entry(
             container,
@@ -173,28 +268,58 @@ class KenjiMusicDownloaderGUI:
             container,
             text="Elegir carpeta...",
             command=self._select_output_directory,
+            width=16,
         )
         self.folder_button.grid(row=5, column=1, padx=(10, 0), pady=(6, 18))
 
-        ttk.Label(container, text="Formato de salida:").grid(
-            row=6, column=0, columnspan=2, sticky="w"
+        self.open_folder_button = ttk.Button(
+            container,
+            text="Abrir carpeta",
+            command=self._open_output_directory,
+            width=14,
+        )
+        self.open_folder_button.grid(row=5, column=2, padx=(8, 0), pady=(6, 18))
+
+        selectors = ttk.Frame(container)
+        selectors.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 18))
+        selectors.columnconfigure(0, weight=1)
+        selectors.columnconfigure(1, weight=1)
+        ttk.Label(selectors, text="Formato de salida:").grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(selectors, text="Calidad de audio:").grid(
+            row=0, column=1, sticky="w", padx=(12, 0)
         )
         self.format_selector = ttk.Combobox(
-            container,
+            selectors,
             textvariable=self.format_value,
             values=[audio_format.selector_label for audio_format in AUDIO_FORMATS],
             state="readonly",
         )
         self.format_selector.grid(
-            row=7,
+            row=1,
             column=0,
-            columnspan=2,
             sticky="ew",
-            pady=(6, 18),
+            pady=(6, 0),
         )
+        self.quality_selector = ttk.Combobox(
+            selectors,
+            textvariable=self.quality_value,
+            values=[quality.selector_label for quality in AUDIO_QUALITIES],
+            state="readonly",
+        )
+        self.quality_selector.grid(
+            row=1,
+            column=1,
+            sticky="ew",
+            padx=(12, 0),
+            pady=(6, 0),
+        )
+        self.format_selector.bind("<<ComboboxSelected>>", self._preference_changed)
+        self.quality_selector.bind("<<ComboboxSelected>>", self._preference_changed)
 
         progress_row = ttk.Frame(container)
-        progress_row.grid(row=8, column=0, columnspan=2, sticky="ew")
+        progress_row.grid(row=7, column=0, columnspan=3, sticky="ew")
         progress_row.columnconfigure(0, weight=1)
         self.progress_bar = ttk.Progressbar(
             progress_row,
@@ -207,7 +332,7 @@ class KenjiMusicDownloaderGUI:
         )
 
         details = ttk.LabelFrame(container, text="Detalles del proceso", padding=12)
-        details.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(14, 18))
+        details.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(14, 18))
         details.columnconfigure(1, weight=1)
         details.columnconfigure(3, weight=1)
         details.columnconfigure(5, weight=1)
@@ -248,8 +373,126 @@ class KenjiMusicDownloaderGUI:
             wraplength=580,
         ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(8, 0), pady=(10, 0))
 
+        history_frame = ttk.LabelFrame(
+            container,
+            text="Historial de descargas (últimas 20)",
+            padding=10,
+        )
+        history_frame.grid(
+            row=9,
+            column=0,
+            columnspan=3,
+            sticky="nsew",
+            pady=(0, 18),
+        )
+        history_frame.columnconfigure(0, weight=1)
+        history_frame.rowconfigure(0, weight=1)
+
+        history_columns = ("name", "format", "quality", "status", "path")
+        self.history_tree = ttk.Treeview(
+            history_frame,
+            columns=history_columns,
+            show="headings",
+            height=4,
+        )
+        history_headings = {
+            "name": "Archivo / canción",
+            "format": "Formato",
+            "quality": "Calidad",
+            "status": "Estado",
+            "path": "Ruta",
+        }
+        history_widths = {
+            "name": 300,
+            "format": 80,
+            "quality": 105,
+            "status": 105,
+            "path": 520,
+        }
+        for column in history_columns:
+            self.history_tree.heading(column, text=history_headings[column])
+            self.history_tree.column(
+                column,
+                width=history_widths[column],
+                minwidth=65,
+                stretch=False,
+            )
+        self.history_tree.grid(row=0, column=0, sticky="nsew")
+
+        history_scroll = ttk.Scrollbar(
+            history_frame,
+            orient="vertical",
+            command=self.history_tree.yview,
+        )
+        history_scroll.grid(row=0, column=1, sticky="ns")
+        horizontal_scroll = ttk.Scrollbar(
+            history_frame,
+            orient="horizontal",
+            command=self.history_tree.xview,
+        )
+        horizontal_scroll.grid(row=1, column=0, sticky="ew")
+        self.history_tree.configure(
+            yscrollcommand=history_scroll.set,
+            xscrollcommand=horizontal_scroll.set,
+        )
+        self.history_tree.bind(
+            "<<TreeviewSelect>>",
+            self._history_selection_changed,
+        )
+        self.history_tree.bind("<Double-1>", self._history_double_click)
+        self.history_tree.bind("<Button-3>", self._show_history_context_menu)
+
+        history_actions = ttk.Frame(history_frame)
+        history_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
+        for column in range(4):
+            history_actions.columnconfigure(column, weight=1)
+
+        ttk.Button(
+            history_actions,
+            text="Abrir seleccionado",
+            command=self._open_selected_history_file,
+            width=18,
+        ).grid(row=0, column=0, sticky="ew", padx=(0, 4))
+        ttk.Button(
+            history_actions,
+            text="Abrir su carpeta",
+            command=self._open_selected_history_folder,
+            width=18,
+        ).grid(row=0, column=1, sticky="ew", padx=4)
+        ttk.Button(
+            history_actions,
+            text="Copiar ruta",
+            command=self._copy_selected_history_path,
+            width=18,
+        ).grid(row=0, column=2, sticky="ew", padx=4)
+        ttk.Button(
+            history_actions,
+            text="Eliminar entrada",
+            command=self._delete_selected_history_entry,
+            width=18,
+        ).grid(row=0, column=3, sticky="ew", padx=(4, 0))
+
+        self.history_context_menu = tk.Menu(self.root, tearoff=False)
+        self.history_context_menu.add_command(
+            label="Abrir archivo",
+            command=self._open_selected_history_file,
+        )
+        self.history_context_menu.add_command(
+            label="Abrir carpeta",
+            command=self._open_selected_history_folder,
+        )
+        self.history_context_menu.add_command(
+            label="Copiar ruta",
+            command=self._copy_selected_history_path,
+        )
+        self.history_context_menu.add_separator()
+        self.history_context_menu.add_command(
+            label="Eliminar entrada del historial",
+            command=self._delete_selected_history_entry,
+        )
+
         actions = ttk.Frame(container)
-        actions.grid(row=10, column=0, columnspan=2, sticky="ew")
+        actions.grid(row=10, column=0, columnspan=3, sticky="ew")
         actions.columnconfigure(0, weight=1)
 
         self.download_button = ttk.Button(
@@ -264,9 +507,666 @@ class KenjiMusicDownloaderGUI:
             text="Cancelar",
             command=self._cancel_download,
             state="disabled",
+            width=14,
         )
         self.cancel_button.grid(row=0, column=1, padx=(10, 0))
+
+        self.open_file_button = ttk.Button(
+            actions,
+            text="Abrir archivo",
+            command=self._open_last_downloaded_file,
+            state="disabled",
+            width=14,
+        )
+        self.open_file_button.grid(row=0, column=2, padx=(8, 0))
+
+        ttk.Label(container, text=f"v{APP_VERSION}").grid(
+            row=11,
+            column=0,
+            columnspan=3,
+            pady=(16, 0),
+        )
         self.url_entry.focus_set()
+
+    def _build_menu(self) -> None:
+        """Crea un menú pequeño con acciones equivalentes a los botones."""
+        menu_bar = tk.Menu(self.root)
+
+        file_menu = tk.Menu(menu_bar, tearoff=False)
+        file_menu.add_command(
+            label="Abrir carpeta de salida",
+            command=self._open_output_directory,
+        )
+        file_menu.add_separator()
+        file_menu.add_command(label="Salir", command=self._on_close)
+        menu_bar.add_cascade(label="Archivo", menu=file_menu)
+
+        tools_menu = tk.Menu(menu_bar, tearoff=False)
+        tools_menu.add_command(label="Limpiar", command=self._clear_interface)
+        tools_menu.add_command(
+            label="Limpiar historial",
+            command=self._clear_history,
+        )
+        tools_menu.add_separator()
+        tools_menu.add_command(
+            label="Verificar herramientas",
+            command=self._start_tools_check,
+        )
+        tools_menu.add_separator()
+
+        theme_menu = tk.Menu(tools_menu, tearoff=False)
+        theme_menu.add_radiobutton(
+            label="Claro",
+            value="light",
+            variable=self.theme_value,
+            command=self._theme_changed,
+        )
+        theme_menu.add_radiobutton(
+            label="Oscuro",
+            value="dark",
+            variable=self.theme_value,
+            command=self._theme_changed,
+        )
+        tools_menu.add_cascade(label="Tema", menu=theme_menu)
+        menu_bar.add_cascade(label="Herramientas", menu=tools_menu)
+
+        help_menu = tk.Menu(menu_bar, tearoff=False)
+        help_menu.add_command(
+            label="Buscar actualizaciones...",
+            command=self._show_update_placeholder,
+        )
+        help_menu.add_command(
+            label="Ver registro de errores",
+            command=self._show_error_log,
+        )
+        help_menu.add_separator()
+        help_menu.add_command(label="Acerca de", command=self._show_about)
+        menu_bar.add_cascade(label="Ayuda", menu=help_menu)
+
+        self.managed_menus = [
+            menu_bar,
+            file_menu,
+            tools_menu,
+            theme_menu,
+            help_menu,
+            self.history_context_menu,
+        ]
+        self.root.configure(menu=menu_bar)
+
+    def _theme_changed(self) -> None:
+        """Aplica y guarda el tema seleccionado desde el menú."""
+        self._apply_theme(self.theme_value.get(), save_preference=True)
+
+    def _apply_theme(self, theme: str, save_preference: bool) -> None:
+        """Configura una paleta estable usando solamente estilos de ttk."""
+        normalized_theme = theme if theme in VALID_THEMES else DEFAULT_THEME
+        palette = THEME_PALETTES[normalized_theme]
+        self.theme_value.set(normalized_theme)
+
+        try:
+            self.style.theme_use("clam")
+        except tk.TclError:
+            pass
+
+        self.root.configure(background=palette["background"])
+        self.style.configure(
+            ".",
+            background=palette["background"],
+            foreground=palette["foreground"],
+        )
+        self.style.configure(
+            "TFrame",
+            background=palette["background"],
+        )
+        self.style.configure(
+            "TLabel",
+            background=palette["background"],
+            foreground=palette["foreground"],
+        )
+        self.style.configure(
+            "TLabelframe",
+            background=palette["background"],
+            bordercolor=palette["border"],
+        )
+        self.style.configure(
+            "TLabelframe.Label",
+            background=palette["background"],
+            foreground=palette["foreground"],
+        )
+        self.style.configure(
+            "TButton",
+            padding=(9, 6),
+            background=palette["surface"],
+            foreground=palette["foreground"],
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", palette["selected"])],
+            foreground=[("disabled", palette["muted"])],
+        )
+        self.style.configure(
+            "TEntry",
+            fieldbackground=palette["surface"],
+            foreground=palette["foreground"],
+            bordercolor=palette["border"],
+        )
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=palette["surface"],
+            background=palette["surface"],
+            foreground=palette["foreground"],
+            arrowcolor=palette["foreground"],
+        )
+        self.style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", palette["surface"])],
+            foreground=[("readonly", palette["foreground"])],
+        )
+        self.style.configure(
+            "Treeview",
+            background=palette["surface"],
+            fieldbackground=palette["surface"],
+            foreground=palette["foreground"],
+            bordercolor=palette["border"],
+            rowheight=25,
+        )
+        self.style.map(
+            "Treeview",
+            background=[("selected", palette["selected"])],
+            foreground=[("selected", palette["foreground"])],
+        )
+        self.style.configure(
+            "Treeview.Heading",
+            background=palette["selected"],
+            foreground=palette["foreground"],
+            padding=(6, 5),
+        )
+        self.style.configure(
+            "Horizontal.TProgressbar",
+            background=palette["accent"],
+            troughcolor=palette["surface"],
+        )
+
+        for menu in self.managed_menus:
+            try:
+                menu.configure(
+                    background=palette["surface"],
+                    foreground=palette["foreground"],
+                    activebackground=palette["selected"],
+                    activeforeground=palette["foreground"],
+                )
+            except tk.TclError:
+                pass
+
+        success_color = "#4ade80" if normalized_theme == "dark" else "#15803d"
+        error_color = "#f87171" if normalized_theme == "dark" else "#dc2626"
+        self.history_tree.tag_configure("completed", foreground=success_color)
+        self.history_tree.tag_configure("cancelled", foreground=palette["muted"])
+        self.history_tree.tag_configure("error", foreground=error_color)
+
+        if save_preference:
+            self._save_preferences(show_error=True)
+
+    def _refresh_history_tree(self) -> None:
+        """Sincroniza la tabla visible con el historial almacenado."""
+        for item_id in self.history_tree.get_children():
+            self.history_tree.delete(item_id)
+        self.history_item_entries.clear()
+
+        for index, entry in enumerate(self.history_entries):
+            item_id = f"history-{index}"
+            self.history_tree.insert(
+                "",
+                "end",
+                iid=item_id,
+                values=(
+                    entry.name,
+                    entry.output_format,
+                    entry.quality,
+                    entry.status_label,
+                    entry.path or "—",
+                ),
+                tags=(entry.status,),
+            )
+            self.history_item_entries[item_id] = entry
+        self._update_open_file_button_state()
+
+    def _get_selected_history_entry(
+        self,
+        show_message: bool = True,
+    ) -> DownloadHistoryEntry | None:
+        """Obtiene la entrada real asociada a la fila seleccionada."""
+        selected_items = self.history_tree.selection()
+        entry = (
+            self.history_item_entries.get(selected_items[0])
+            if selected_items
+            else None
+        )
+        if entry is None and show_message:
+            messagebox.showinfo(
+                "Historial",
+                "Selecciona una descarga del historial.",
+                parent=self.root,
+            )
+        return entry
+
+    def _history_entry_file_path(
+        self,
+        entry: DownloadHistoryEntry,
+    ) -> Path | None:
+        """Valida que la ruta almacenada siga apuntando a un archivo real."""
+        file_path = Path(entry.path).expanduser() if entry.path else None
+        if file_path is None or not file_path.is_file():
+            message = "El archivo ya no existe en la ruta guardada."
+            log_error("Historial", message)
+            messagebox.showerror("Archivo no disponible", message, parent=self.root)
+            return None
+        return file_path
+
+    def _open_history_entry_file(self, entry: DownloadHistoryEntry) -> None:
+        """Abre un archivo validado desde una entrada del historial."""
+        file_path = self._history_entry_file_path(entry)
+        if file_path is None:
+            return
+        try:
+            open_file(file_path)
+        except OpenFileError as error:
+            log_error("Abrir archivo", str(error), error)
+            messagebox.showerror(
+                "No se pudo abrir el archivo",
+                str(error),
+                parent=self.root,
+            )
+
+    def _open_selected_history_file(self) -> None:
+        """Abre la descarga elegida en la tabla."""
+        entry = self._get_selected_history_entry()
+        if entry is not None:
+            self._open_history_entry_file(entry)
+
+    def _open_selected_history_folder(self) -> None:
+        """Abre la carpeta que contiene la descarga seleccionada."""
+        entry = self._get_selected_history_entry()
+        if entry is None:
+            return
+        file_path = self._history_entry_file_path(entry)
+        if file_path is None:
+            return
+        try:
+            open_directory(file_path.parent)
+        except OpenDirectoryError as error:
+            log_error("Abrir carpeta", str(error), error)
+            messagebox.showerror(
+                "No se pudo abrir la carpeta",
+                str(error),
+                parent=self.root,
+            )
+
+    def _copy_selected_history_path(self) -> None:
+        """Copia al portapapeles la ruta completa de la descarga elegida."""
+        entry = self._get_selected_history_entry()
+        if entry is None:
+            return
+        file_path = self._history_entry_file_path(entry)
+        if file_path is None:
+            return
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(str(file_path.resolve()))
+            self.root.update_idletasks()
+        except tk.TclError as error:
+            log_error("Portapapeles", "No se pudo copiar la ruta.", error)
+            messagebox.showerror(
+                "No se pudo copiar",
+                "No se pudo copiar la ruta al portapapeles.",
+                parent=self.root,
+            )
+            return
+
+        messagebox.showinfo(
+            "Ruta copiada",
+            "La ruta completa se copió al portapapeles.",
+            parent=self.root,
+        )
+
+    def _delete_selected_history_entry(self) -> None:
+        """Borra solo la entrada seleccionada, nunca el archivo de audio."""
+        entry = self._get_selected_history_entry()
+        if entry is None:
+            return
+        if not messagebox.askyesno(
+            "Eliminar entrada",
+            "¿Eliminar esta entrada del historial? El archivo real se conservará.",
+            parent=self.root,
+        ):
+            return
+
+        try:
+            self.history_entries = remove_history_entry(
+                self.history_entries,
+                entry,
+            )
+            self._refresh_history_tree()
+        except HistoryError as error:
+            log_error("Historial", str(error), error)
+            messagebox.showerror("Historial", str(error), parent=self.root)
+
+    def _history_selection_changed(self, _event: tk.Event | None = None) -> None:
+        """Activa Abrir archivo cuando hay una fila utilizable seleccionada."""
+        self._update_open_file_button_state()
+
+    def _update_open_file_button_state(self) -> None:
+        """Conserva disponible el botón si hay selección o una última descarga."""
+        has_selection = bool(self.history_tree.selection())
+        has_last_download = self.last_downloaded_path is not None
+        self.open_file_button.configure(
+            state="normal" if has_selection or has_last_download else "disabled"
+        )
+
+    def _history_double_click(self, event: tk.Event) -> str | None:
+        """Abre con doble clic la fila situada bajo el puntero."""
+        item_id = self.history_tree.identify_row(event.y)
+        if not item_id:
+            return None
+        self.history_tree.selection_set(item_id)
+        self.history_tree.focus(item_id)
+        self._open_selected_history_file()
+        return "break"
+
+    def _show_history_context_menu(self, event: tk.Event) -> str | None:
+        """Selecciona la fila bajo el cursor y muestra sus acciones."""
+        item_id = self.history_tree.identify_row(event.y)
+        if not item_id:
+            return None
+        self.history_tree.selection_set(item_id)
+        self.history_tree.focus(item_id)
+        try:
+            self.history_context_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.history_context_menu.grab_release()
+        return "break"
+
+    def _record_history(self, status: str, output_path: Path | None = None) -> None:
+        """Añade el resultado actual al historial sin afectar la descarga."""
+        audio_format = self.active_audio_format
+        audio_quality = self.active_audio_quality
+        if audio_format is None or audio_quality is None:
+            return
+
+        if output_path is not None:
+            name = output_path.name
+            path = str(output_path)
+        else:
+            name = self.active_download_name
+            path = ""
+
+        quality = (
+            f"{audio_quality.bitrate_kbps} kbps"
+            if audio_format.supports_bitrate
+            else "Sin pérdida"
+        )
+        entry = DownloadHistoryEntry.create(
+            name=name,
+            output_format=audio_format.display_name,
+            quality=quality,
+            status=status,
+            path=path,
+        )
+        try:
+            self.history_entries = add_history_entry(self.history_entries, entry)
+            self._refresh_history_tree()
+        except HistoryError as error:
+            log_error("Historial", str(error), error)
+
+    def _clear_history(self) -> None:
+        """Elimina solo el registro, nunca los archivos descargados."""
+        if not self.history_entries:
+            messagebox.showinfo(
+                "Historial",
+                "El historial ya está vacío.",
+                parent=self.root,
+            )
+            return
+        if not messagebox.askyesno(
+            "Limpiar historial",
+            "¿Quieres borrar el historial? Los archivos descargados se conservarán.",
+            parent=self.root,
+        ):
+            return
+
+        try:
+            clear_download_history()
+            self.history_entries = []
+            self._refresh_history_tree()
+        except HistoryError as error:
+            log_error("Historial", str(error), error)
+            messagebox.showerror("Historial", str(error), parent=self.root)
+
+    def _open_last_downloaded_file(self) -> None:
+        """Prioriza la fila seleccionada y usa después la última descarga."""
+        selected_entry = self._get_selected_history_entry(show_message=False)
+        if selected_entry is not None:
+            self._open_history_entry_file(selected_entry)
+            return
+
+        if self.last_downloaded_path is None:
+            messagebox.showinfo(
+                "Abrir archivo",
+                "No hay un archivo descargado disponible para abrir.",
+                parent=self.root,
+            )
+            return
+        if not self.last_downloaded_path.is_file():
+            message = "El archivo ya no existe en la ruta guardada."
+            log_error("Abrir archivo", message)
+            self.last_downloaded_path = None
+            self._update_open_file_button_state()
+            messagebox.showerror(
+                "Archivo no disponible",
+                message,
+                parent=self.root,
+            )
+            return
+        try:
+            open_file(self.last_downloaded_path)
+        except OpenFileError as error:
+            self.last_downloaded_path = None
+            self._update_open_file_button_state()
+            log_error("Abrir archivo", str(error), error)
+            messagebox.showerror(
+                "No se pudo abrir el archivo",
+                str(error),
+                parent=self.root,
+            )
+
+    def _start_tools_check(self) -> None:
+        """Ejecuta la verificación en segundo plano para no congelar la ventana."""
+        if self.tools_check_running:
+            return
+        self.tools_check_running = True
+        self.status_value.set("Verificando herramientas y conexión...")
+        output_directory = Path(self.output_value.get().strip() or DOWNLOADS_DIRECTORY)
+
+        worker = threading.Thread(
+            target=self._tools_check_worker,
+            args=(output_directory,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _tools_check_worker(self, output_directory: Path) -> None:
+        """Realiza el diagnóstico fuera del hilo principal de Tkinter."""
+        try:
+            results = verify_tools(output_directory)
+        except Exception as error:
+            log_error("Diagnóstico", "Falló la verificación de herramientas.", error)
+            self.events.put(("tools_check_error", str(error)))
+        else:
+            self.events.put(("tools_check_result", results))
+
+    def _show_tools_check(self, results: list[ToolCheckResult]) -> None:
+        """Presenta todos los resultados en un único cuadro entendible."""
+        self.tools_check_running = False
+        self.status_value.set("Verificación de herramientas completada.")
+        message = "\n".join(result.display_line() for result in results)
+        for result in results:
+            if not result.available:
+                log_error(
+                    "Verificación de herramientas",
+                    f"{result.label}: {result.detail}",
+                )
+        if all(result.available for result in results):
+            messagebox.showinfo("Verificar herramientas", message, parent=self.root)
+        else:
+            messagebox.showwarning("Verificar herramientas", message, parent=self.root)
+
+    def _show_error_log(self) -> None:
+        """Muestra el registro dentro de la aplicación sin depender de un editor."""
+        try:
+            content = read_error_log()
+        except ErrorLogReadError as error:
+            log_error("Registro de errores", str(error), error)
+            messagebox.showerror("Registro de errores", str(error), parent=self.root)
+            return
+
+        if not content:
+            messagebox.showinfo(
+                "Registro de errores",
+                "No hay errores registrados.",
+                parent=self.root,
+            )
+            return
+
+        window = tk.Toplevel(self.root)
+        window.title("Registro de errores")
+        window.geometry("820x520")
+        window.transient(self.root)
+
+        palette = THEME_PALETTES[self.theme_value.get()]
+        log_text = tk.Text(
+            window,
+            wrap="word",
+            background=palette["surface"],
+            foreground=palette["foreground"],
+            insertbackground=palette["foreground"],
+            padx=12,
+            pady=12,
+        )
+        scrollbar = ttk.Scrollbar(window, command=log_text.yview)
+        log_text.configure(yscrollcommand=scrollbar.set)
+        log_text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        log_text.insert("1.0", content[-100_000:])
+        log_text.configure(state="disabled")
+
+    def _paste_link(self) -> None:
+        """Pega texto desde el portapapeles sin ejecutar ni interpretar su contenido."""
+        try:
+            clipboard_text = self.root.clipboard_get().strip()
+        except tk.TclError:
+            clipboard_text = ""
+
+        if not clipboard_text:
+            messagebox.showwarning(
+                "Portapapeles vacío",
+                "El portapapeles está vacío o no contiene texto.",
+                parent=self.root,
+            )
+            return
+
+        self.url_value.set(clipboard_text)
+        self.url_entry.icursor(tk.END)
+
+    def _clear_interface(self) -> None:
+        """Reinicia la descarga visible sin olvidar carpeta ni preferencias."""
+        if self.is_downloading:
+            messagebox.showwarning(
+                "Descarga en curso",
+                "Cancela la descarga antes de limpiar la interfaz.",
+                parent=self.root,
+            )
+            return
+
+        self.url_value.set("")
+        self._show_progress(0.0)
+        self.status_value.set("Listo para descargar.")
+        self.video_title_value.set("Esperando información...")
+        self.size_value.set("0 B / —")
+        self.speed_value.set("—")
+        self.eta_value.set("—")
+        self.timings.clear()
+        self.timings_value.set("Esperando una descarga...")
+        self.current_stage = "idle"
+        self.connection_started_at = None
+        self.connection_warning_level = 0
+        self.url_entry.focus_set()
+
+    def _open_output_directory(self) -> None:
+        """Abre la carpeta seleccionada usando la función propia del sistema."""
+        output_text = self.output_value.get().strip()
+        if not output_text:
+            messagebox.showerror(
+                "Carpeta no válida",
+                "Selecciona una carpeta de salida.",
+                parent=self.root,
+            )
+            return
+
+        try:
+            directory = Path(output_text).expanduser().resolve()
+            directory.mkdir(parents=True, exist_ok=True)
+            open_directory(directory)
+        except (OSError, OpenDirectoryError) as error:
+            log_error("Abrir carpeta", str(error), error)
+            messagebox.showerror(
+                "No se pudo abrir la carpeta",
+                str(error),
+                parent=self.root,
+            )
+
+    def _show_about(self) -> None:
+        """Muestra los datos centralizados de nombre, versión y descripción."""
+        messagebox.showinfo(
+            "Acerca de",
+            f"{APP_NAME}\nVersión {APP_VERSION}\n\n{APP_DESCRIPTION}",
+            parent=self.root,
+        )
+
+    def _show_update_placeholder(self) -> None:
+        """Usa el módulo reservado para una futura actualización real."""
+        status = check_for_updates()
+        messagebox.showinfo(
+            "Actualizaciones",
+            status.message,
+            parent=self.root,
+        )
+
+    def _preference_changed(self, _event: tk.Event | None = None) -> None:
+        """Guarda automáticamente los selectores al cambiar su valor."""
+        self._save_preferences()
+
+    def _save_preferences(self, show_error: bool = False) -> None:
+        """Persiste únicamente valores validados y nunca datos de la descarga."""
+        try:
+            audio_format = get_audio_format_from_label(self.format_value.get())
+            audio_quality = get_audio_quality_from_label(self.quality_value.get())
+            save_user_settings(
+                UserSettings(
+                    output_directory=self.output_value.get().strip()
+                    or str(DOWNLOADS_DIRECTORY),
+                    output_format=audio_format.key,
+                    audio_quality=audio_quality.key,
+                    theme=self.theme_value.get(),
+                )
+            )
+        except (ValueError, SettingsError) as error:
+            log_error("Configuración", str(error), error)
+            if show_error:
+                messagebox.showwarning(
+                    "Configuración no guardada",
+                    str(error),
+                    parent=self.root,
+                )
 
     def _select_output_directory(self) -> None:
         """Abre el selector nativo y conserva la ruta como un objeto portable."""
@@ -277,24 +1177,52 @@ class KenjiMusicDownloaderGUI:
         )
         if selected:
             self.output_value.set(str(Path(selected)))
+            self._save_preferences(show_error=True)
 
     def _start_download(self) -> None:
         """Valida los datos antes de crear el hilo que hará el trabajo pesado."""
-        raw_url = self.url_value.get()
+        raw_url = self.url_value.get().strip()
+        if not raw_url:
+            messagebox.showerror(
+                "Enlace no válido",
+                "Por favor ingresa un enlace válido de YouTube.",
+                parent=self.root,
+            )
+            return
+
+        operation_started_at = perf_counter()
+        validation_started_at = operation_started_at
+        try:
+            safe_url = validate_and_normalize_youtube_url(raw_url)
+        except InvalidYouTubeURLError:
+            messagebox.showerror(
+                "Enlace no válido",
+                "Por favor ingresa un enlace válido de YouTube.",
+                parent=self.root,
+            )
+            return
+        validation_seconds = perf_counter() - validation_started_at
+
         output_text = self.output_value.get().strip()
         if not output_text:
             messagebox.showerror(
                 "Carpeta no válida",
-                "Selecciona una carpeta donde guardar el MP3.",
+                "Selecciona una carpeta donde guardar el audio.",
                 parent=self.root,
             )
             return
 
         try:
             audio_format = get_audio_format_from_label(self.format_value.get())
+            audio_quality = get_audio_quality_from_label(self.quality_value.get())
         except ValueError as error:
             messagebox.showerror("Formato no válido", str(error), parent=self.root)
             return
+
+        self._save_preferences(show_error=True)
+        self.active_audio_format = audio_format
+        self.active_audio_quality = audio_quality
+        self.active_download_name = "Descarga sin título"
 
         self.cancel_event = threading.Event()
         self.cancel_requested = False
@@ -314,19 +1242,23 @@ class KenjiMusicDownloaderGUI:
         # Dibuja el estado y arranca inmediatamente, sin una espera artificial.
         self.root.update_idletasks()
         self._launch_download_worker(
-            raw_url,
+            safe_url,
             Path(output_text),
             audio_format.key,
-            perf_counter(),
+            audio_quality.key,
+            operation_started_at,
+            validation_seconds,
             self.cancel_event,
         )
 
     def _launch_download_worker(
         self,
-        raw_url: str,
+        safe_url: str,
         output_directory: Path,
         output_format: str,
+        audio_quality: str,
         operation_started_at: float,
+        validation_seconds: float,
         cancel_event: threading.Event,
     ) -> None:
         """Inicia el trabajo después de que la ventana haya actualizado su estado."""
@@ -334,10 +1266,12 @@ class KenjiMusicDownloaderGUI:
         worker = threading.Thread(
             target=self._download_worker,
             args=(
-                raw_url,
+                safe_url,
                 output_directory,
                 output_format,
+                audio_quality,
                 operation_started_at,
+                validation_seconds,
                 cancel_event,
             ),
             daemon=True,
@@ -346,27 +1280,25 @@ class KenjiMusicDownloaderGUI:
 
     def _download_worker(
         self,
-        raw_url: str,
+        safe_url: str,
         output_directory: Path,
         output_format: str,
+        audio_quality: str,
         operation_started_at: float,
+        validation_seconds: float,
         cancel_event: threading.Event,
     ) -> None:
         """Ejecuta yt-dlp fuera del hilo gráfico y comunica resultados por una cola."""
         try:
             if cancel_event.is_set():
                 raise DownloadCancelledError("La descarga fue cancelada.")
-            validation_started_at = perf_counter()
-            try:
-                safe_url = validate_and_normalize_youtube_url(raw_url)
-            finally:
-                self._publish_local_timing(
-                    TimingMetric(
-                        key="validation",
-                        label="Validación",
-                        seconds=perf_counter() - validation_started_at,
-                    )
+            self._publish_local_timing(
+                TimingMetric(
+                    key="validation",
+                    label="Validación",
+                    seconds=validation_seconds,
                 )
+            )
 
             if cancel_event.is_set():
                 raise DownloadCancelledError("La descarga fue cancelada.")
@@ -378,15 +1310,19 @@ class KenjiMusicDownloaderGUI:
                 timing_callback=lambda metric: self.events.put(("timing", metric)),
                 cancel_event=cancel_event,
                 output_format=output_format,
+                audio_quality=audio_quality,
             )
             output_path = downloader.download_audio(safe_url)
         except DownloadCancelledError:
             result_event: GuiEvent = ("cancelled", None)
-        except InvalidYouTubeURLError as error:
-            result_event = ("validation_error", str(error))
-        except (ConfigurationError, AudioDownloadError) as error:
+        except ConfigurationError as error:
+            log_error("Configuración", str(error), error)
             result_event = ("error", str(error))
-        except Exception:
+        except AudioDownloadError as error:
+            log_error("Descarga o conversión", str(error), error)
+            result_event = ("error", str(error))
+        except Exception as error:
+            log_error("Error inesperado", "Falló el proceso de descarga.", error)
             # No se muestra una traza técnica al usuario final.
             result_event = (
                 "error",
@@ -422,14 +1358,22 @@ class KenjiMusicDownloaderGUI:
                     self._show_download_progress(value)
                 elif event_name == "timing" and isinstance(value, TimingMetric):
                     self._show_timing(value)
-                elif event_name == "validation_error":
-                    self._finish_error(str(value), "Enlace no válido")
                 elif event_name == "success":
                     self._finish_success(Path(value))
                 elif event_name == "cancelled":
                     self._finish_cancelled()
                 elif event_name == "error":
                     self._finish_error(str(value))
+                elif event_name == "tools_check_result" and isinstance(value, list):
+                    self._show_tools_check(value)
+                elif event_name == "tools_check_error":
+                    self.tools_check_running = False
+                    self.status_value.set("No se pudo completar la verificación.")
+                    messagebox.showerror(
+                        "Verificar herramientas",
+                        "No se pudo completar la verificación. Revisa el registro de errores.",
+                        parent=self.root,
+                    )
         except queue.Empty:
             pass
 
@@ -494,6 +1438,7 @@ class KenjiMusicDownloaderGUI:
 
         if progress.title:
             self.video_title_value.set(progress.title)
+            self.active_download_name = progress.title
 
         if progress.downloaded_bytes is not None:
             downloaded = format_bytes(progress.downloaded_bytes)
@@ -525,8 +1470,11 @@ class KenjiMusicDownloaderGUI:
 
     def _finish_success(self, output_path: Path) -> None:
         """Restaura la ventana e informa dónde quedó el MP3."""
+        self.last_downloaded_path = output_path
+        self._record_history("completed", output_path)
         self._show_progress(100.0)
         self._clear_active_operation("completed")
+        self.open_file_button.configure(state="normal")
         self.status_value.set("Descarga completada.")
         self.speed_value.set("—")
         self.eta_value.set("00:00")
@@ -543,6 +1491,7 @@ class KenjiMusicDownloaderGUI:
         dialog_title: str = "No se pudo descargar",
     ) -> None:
         """Restaura la ventana y presenta un error entendible."""
+        self._record_history("error")
         self._show_progress(0.0)
         self._clear_active_operation("error")
         self.status_value.set(message)
@@ -550,6 +1499,7 @@ class KenjiMusicDownloaderGUI:
 
     def _finish_cancelled(self) -> None:
         """Finaliza una cancelación cooperativa y permite iniciar otra descarga."""
+        self._record_history("cancelled")
         self._show_progress(0.0)
         self._clear_active_operation("cancelled")
         self.status_value.set("Operación cancelada.")
@@ -587,8 +1537,11 @@ class KenjiMusicDownloaderGUI:
         self.is_downloading = busy
         self.download_button.configure(state="disabled" if busy else "normal")
         self.folder_button.configure(state="disabled" if busy else "normal")
+        self.paste_button.configure(state="disabled" if busy else "normal")
+        self.clear_button.configure(state="disabled" if busy else "normal")
         self.url_entry.configure(state="disabled" if busy else "normal")
         self.format_selector.configure(state="disabled" if busy else "readonly")
+        self.quality_selector.configure(state="disabled" if busy else "readonly")
         self.cancel_button.configure(
             state="normal" if busy and not self.cancel_requested else "disabled"
         )
@@ -603,6 +1556,7 @@ class KenjiMusicDownloaderGUI:
             return
         if self.cancel_event:
             self.cancel_event.set()
+        self._save_preferences()
         self.root.destroy()
 
 

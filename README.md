@@ -5,6 +5,8 @@ YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
 interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
 FFmpeg.
 
+Versión actual: **v1.0.0**.
+
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
 
@@ -22,7 +24,14 @@ FFmpeg.
 - No solicita miniaturas, comentarios, subtítulos, descripciones ni archivos JSON.
 - Permite cancelar una operación lenta sin bloquear ni cerrar la ventana.
 - Guarda como `Título.ext`, sin ID de YouTube; si existe, usa `Título (1).ext`.
-- No incluye historial, playlists ni instaladores de terceros.
+- Incluye botones para pegar el enlace, limpiar la interfaz y abrir la carpeta.
+- Recuerda la última carpeta, formato, calidad y tema elegidos.
+- Conserva un historial local de las últimas 20 descargas.
+- Permite abrir el último archivo descargado con el reproductor predeterminado.
+- Verifica `yt-dlp`, FFmpeg, FFprobe, carpeta de salida y conexión.
+- Incluye temas claro y oscuro y un registro local de errores.
+- Ofrece menú de Archivo, Herramientas y Ayuda.
+- No incluye playlists ni instaladores de terceros.
 
 ## Requisitos
 
@@ -38,6 +47,65 @@ El selector ofrece MP3 (predeterminado), M4A/AAC, OPUS, WAV, FLAC y OGG. Todos
 conservan el nombre limpio y la extensión correspondiente. WAV y FLAC evitan
 pérdidas adicionales durante la conversión, pero no recuperan información que
 ya haya sido comprimida por la fuente de YouTube.
+
+## Calidad y preferencias
+
+Para formatos comprimidos se puede elegir 128, 192, 256 o 320 kbps. La opción
+predeterminada es **Media - 192 kbps**. WAV y FLAC no reciben un bitrate con
+pérdida: el selector se conserva como preferencia, pero no se aplica de forma
+incorrecta a esos formatos.
+
+La aplicación guarda automáticamente la última carpeta, formato, calidad y
+tema en un archivo JSON del perfil del usuario:
+
+- Windows: `%APPDATA%\KenjiMusicDownloader\settings.json`
+- Linux: `~/.config/kenji-music-downloader/settings.json` o la ruta indicada por
+  `XDG_CONFIG_HOME`.
+
+El botón **Limpiar** no modifica estas preferencias ni borra archivos. El botón
+**Abrir carpeta** usa el explorador de archivos nativo del sistema y no ejecuta
+texto proporcionado por el usuario como comando.
+
+## Historial, herramientas y registro
+
+La ventana muestra las últimas 20 operaciones con nombre, formato, calidad,
+estado y ruta. Registra resultados completados, cancelados y con error. La
+opción **Herramientas > Limpiar historial** elimina únicamente este registro;
+nunca borra los audios descargados.
+
+Selecciona una fila para usar **Abrir seleccionado**, **Abrir su carpeta**,
+**Copiar ruta** o **Eliminar entrada**. Las mismas acciones aparecen con clic
+derecho. Un doble clic abre directamente el archivo. Eliminar una entrada no
+borra el audio real. Las rutas largas permanecen completas y se consultan con
+la barra horizontal sin ensanchar la ventana.
+
+Después de una descarga correcta se activa **Abrir archivo**, que utiliza el
+reproductor predeterminado del sistema. Si hay una fila seleccionada, este
+botón abre primero esa descarga; si no, abre el último archivo descargado. Si
+el archivo fue movido o eliminado, la aplicación muestra un error claro.
+
+**Herramientas > Verificar herramientas** comprueba en segundo plano:
+
+- módulo Python de `yt-dlp`;
+- comandos `ffmpeg` y `ffprobe` en el `PATH`;
+- existencia y permiso de escritura de la carpeta de salida;
+- conexión HTTPS básica con YouTube.
+
+La opción **Herramientas > Tema** permite cambiar entre Claro y Oscuro. La
+preferencia se carga automáticamente al volver a iniciar la aplicación.
+
+Los datos locales se guardan junto a `settings.json`:
+
+- `history.json`: historial limitado a 20 entradas.
+- `logs/errors.log`: errores importantes de descarga, conversión, herramientas,
+  configuración y apertura de archivos o carpetas.
+
+En Windows, `settings.json` e `history.json` están en
+`%APPDATA%\KenjiMusicDownloader\`, y el log está en
+`%APPDATA%\KenjiMusicDownloader\logs\errors.log`. En Linux se usa
+`~/.config/kenji-music-downloader/` o `XDG_CONFIG_HOME`. El registro se puede
+consultar desde **Ayuda > Ver registro de errores**. Si está vacío, la
+aplicación muestra `No hay errores registrados.`
 
 ## Probar en Windows
 
@@ -80,8 +148,23 @@ Si PowerShell impide activar el entorno virtual, puedes ejecutar sin activarlo:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe -m src.gui
 ```
+
+## Crear el ejecutable para Windows
+
+PyInstaller debe ejecutarse en Windows para generar el `.exe`. Desde la raíz
+del proyecto y usando el entorno virtual actual:
+
+```powershell
+.\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
+.\dist\kenji-music-downloader.exe
+```
+
+El ejecutable no depende de la carpeta de desarrollo de Codex. Las preferencias,
+el historial y los logs continúan guardándose bajo `%APPDATA%`. FFmpeg y
+FFprobe deben seguir disponibles en el `PATH` del sistema.
 
 ## Pasar el proyecto a Linux
 
@@ -206,12 +289,24 @@ kenji-music-downloader/
 │   ├── gui.py
 │   ├── main.py
 │   ├── downloader.py
+│   ├── audio_formats.py
+│   ├── user_settings.py
+│   ├── platform_utils.py
+│   ├── download_history.py
+│   ├── diagnostics.py
+│   ├── error_log.py
+│   ├── updates.py
 │   ├── security.py
 │   └── config.py
 ├── downloads/
 │   └── .gitkeep
 ├── tests/
 │   ├── test_downloader.py
+│   ├── test_download_history.py
+│   ├── test_diagnostics.py
+│   ├── test_error_log.py
+│   ├── test_platform_utils.py
+│   ├── test_user_settings.py
 │   └── test_security.py
 ├── scripts/
 │   └── build_linux.sh
@@ -228,7 +323,13 @@ kenji-music-downloader/
 - `src/security.py`: valida el dominio y extrae un identificador de video seguro.
 - `src/downloader.py`: descarga y convierte al formato elegido mediante `yt-dlp` y FFmpeg.
 - `src/audio_formats.py`: catálogo permitido de formatos, códecs y extensiones.
-- `src/config.py`: rutas portables, carpeta de salida y comprobación de FFmpeg.
+- `src/user_settings.py`: preferencias JSON portables del usuario.
+- `src/platform_utils.py`: apertura segura de carpetas en Windows, Linux y macOS.
+- `src/download_history.py`: historial JSON persistente y limitado.
+- `src/diagnostics.py`: verificación de herramientas, carpeta y conexión.
+- `src/error_log.py`: registro local de errores importantes.
+- `src/updates.py`: punto de extensión para una futura búsqueda de actualizaciones.
+- `src/config.py`: versión, rutas portables y comprobación de FFmpeg.
 - `tests/test_security.py`: verifica que se acepten y rechacen los enlaces correctos.
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.
 - `kenji-music-downloader.spec`: configuración portable de PyInstaller.

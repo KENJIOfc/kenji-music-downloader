@@ -2,7 +2,12 @@
 
 import unittest
 
-from src.audio_formats import AUDIO_FORMATS, DEFAULT_AUDIO_FORMAT_KEY
+from src.audio_formats import (
+    AUDIO_FORMATS,
+    AUDIO_QUALITIES,
+    DEFAULT_AUDIO_FORMAT_KEY,
+    DEFAULT_AUDIO_QUALITY_KEY,
+)
 from src.gui import connection_delay_notice, format_bytes, format_eta, format_speed
 
 
@@ -27,6 +32,13 @@ class GuiFormattingTests(unittest.TestCase):
         self.assertEqual(format_eta(65), "01:05")
         self.assertEqual(format_eta(3661), "01:01:01")
         self.assertEqual(format_eta(None), "—")
+
+    def test_medium_quality_is_default(self) -> None:
+        self.assertEqual(DEFAULT_AUDIO_QUALITY_KEY, "medium")
+        self.assertEqual(
+            [quality.bitrate_kbps for quality in AUDIO_QUALITIES],
+            [128, 192, 256, 320],
+        )
 
     def test_connection_delay_notices(self) -> None:
         self.assertEqual(connection_delay_notice(29.9), (0, None))
