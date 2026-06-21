@@ -8,5 +8,4 @@ cd "$project_root"
 python -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
 mkdir -p dist/downloads
 
-echo "Ejecutable creado en: $project_root/dist/kenji-music-downloader"
-
+echo "Ejecutable creado en: $project_root/dist/KenjiMusicDownloader"

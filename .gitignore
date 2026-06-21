@@ -22,8 +22,11 @@ downloads/*
 *.log
 *.tmp
 *.temp
+*.bak
 *.part
 *.ytdl
+settings.json
+history.json
 .env
 .env.*
 cookies.txt

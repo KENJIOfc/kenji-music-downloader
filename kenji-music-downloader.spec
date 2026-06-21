@@ -35,7 +35,7 @@ executable = EXE(
     analysis.binaries,
     analysis.datas,
     [],
-    name="kenji-music-downloader",
+    name="KenjiMusicDownloader",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

@@ -5,7 +5,7 @@ YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
 interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
 FFmpeg.
 
-Versión actual: **v1.0.0**.
+Versión actual: **v1.0.2**.
 
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
@@ -38,9 +38,26 @@ Versión actual: **v1.0.0**.
 
 - Python 3.10 o posterior.
 - Tkinter (incluido normalmente con Python en Windows).
-- FFmpeg disponible en el `PATH` del sistema.
+- FFmpeg y FFprobe disponibles en el `PATH` del sistema.
 - `yt-dlp-ejs` y Deno, instalados automáticamente mediante `requirements.txt`.
 - Conexión a Internet durante las descargas.
+
+El ejecutable de Windows incluye Python, `yt-dlp` y Deno; el usuario no
+necesita instalar Python. FFmpeg y FFprobe continúan siendo herramientas del
+sistema y deben instalarse por separado.
+
+## Descargar desde GitHub Releases
+
+Las versiones publicadas se distribuyen desde
+[GitHub Releases](https://github.com/KENJIOFC/kenji-music-downloader/releases).
+Para Windows, descarga el archivo con nombre similar a
+`KenjiMusicDownloader-v1.0.2-Windows-x64.zip`, extráelo y ejecuta
+`KenjiMusicDownloader.exe`.
+
+Esta primera distribución no está firmada digitalmente. Windows SmartScreen o
+una política corporativa pueden mostrar una advertencia o bloquear ejecutables
+sin firma. Descarga únicamente desde el repositorio oficial y comprueba el
+hash SHA-256 publicado junto a cada release.
 
 ## Formatos de audio
 
@@ -104,9 +121,10 @@ Para que la detección funcione debe existir al menos una release publicada en
 GitHub. Si todavía no hay releases, la búsqueda manual muestra una explicación
 clara. Para probar el flujo:
 
-1. publica una release con tag `v1.0.0` y comprueba que la app indique que está
+1. publica una release con tag `v1.0.2` y comprueba que la app indique que está
    actualizada;
-2. publica después una release con tag `v1.0.1`;
+2. publica después una release de prueba con una versión superior, como
+   `v1.0.3`;
 3. vuelve a buscar y la app ofrecerá abrir la página de Releases.
 
 ## Historial, herramientas y registro
@@ -181,6 +199,7 @@ la instalación, ejecuta las pruebas y abre la interfaz gráfica:
 
 ```powershell
 ffmpeg -version
+ffprobe -version
 python -m unittest discover -s tests -v
 python -m src.gui
 ```
@@ -197,17 +216,31 @@ Si PowerShell impide activar el entorno virtual, puedes ejecutar sin activarlo:
 
 ## Crear el ejecutable para Windows
 
-PyInstaller debe ejecutarse en Windows para generar el `.exe`. Desde la raíz
-del proyecto y usando el entorno virtual actual:
+PyInstaller debe ejecutarse en Windows para generar el `.exe`. El script de
+construcción elimina únicamente `build/` y `dist/`, ejecuta las pruebas,
+construye el ejecutable y crea el ZIP para GitHub Releases:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
+```
+
+Resultados:
+
+```text
+dist\KenjiMusicDownloader.exe
+dist\KenjiMusicDownloader-v1.0.2-Windows-x64.zip
+```
+
+El comando manual equivalente es:
 
 ```powershell
 .\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
-.\dist\kenji-music-downloader.exe
 ```
 
-El ejecutable no depende de la carpeta de desarrollo de Codex. Las preferencias,
-el historial y los logs continúan guardándose bajo `%APPDATA%`. FFmpeg y
-FFprobe deben seguir disponibles en el `PATH` del sistema.
+El ejecutable es de un solo archivo, no abre consola negra y no depende de la
+carpeta de desarrollo de Codex. Las preferencias, el historial y los logs
+continúan guardándose bajo `%APPDATA%`. FFmpeg y FFprobe deben estar en el
+`PATH` del sistema, incluso al ejecutar el `.exe` desde otra carpeta.
 
 ## Pasar el proyecto a Linux
 
@@ -240,7 +273,7 @@ construcción usa el archivo `kenji-music-downloader.spec`:
 
 ```bash
 bash scripts/build_linux.sh
-./dist/kenji-music-downloader
+./dist/KenjiMusicDownloader
 ```
 
 El comando equivalente, si prefieres ejecutarlo manualmente, es:
@@ -250,7 +283,7 @@ python -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
 mkdir -p dist/downloads
 ```
 
-El ejecutable se crea en `dist/kenji-music-downloader`. FFmpeg continúa siendo
+El ejecutable se crea en `dist/KenjiMusicDownloader`. FFmpeg continúa siendo
 una dependencia del sistema: debe estar instalado en la laptop Linux. El
 ejecutable abre la interfaz gráfica sin una consola adicional. La carpeta
 predeterminada será `dist/downloads`, pero puede cambiarse desde la ventana.
@@ -258,15 +291,15 @@ predeterminada será `dist/downloads`, pero puede cambiarse desde la ventana.
 Para distribuirlo manualmente, copia a la misma carpeta:
 
 ```text
-kenji-music-downloader
+KenjiMusicDownloader
 downloads/
 ```
 
 Si hace falta restaurar el permiso de ejecución:
 
 ```bash
-chmod +x kenji-music-downloader
-./kenji-music-downloader
+chmod +x KenjiMusicDownloader
+./KenjiMusicDownloader
 ```
 
 ## Diagnosticar tiempos de descarga
@@ -323,6 +356,22 @@ FORCE_IPV4 = False  # Desactivado
 SOCKET_TIMEOUT_SECONDS = 20
 ```
 
+## Archivos locales y publicación segura
+
+El repositorio conserva únicamente `downloads/.gitkeep` para crear la carpeta
+vacía. `.gitignore` excluye audios, entornos virtuales, cachés, builds, logs,
+temporales, cookies y configuraciones locales. Antes de publicar puedes revisar:
+
+```powershell
+git status
+git ls-files downloads
+git ls-files "*.mp3" "*.m4a" "*.opus" "*.wav" "*.flac" "*.ogg" "*.log"
+```
+
+`settings.json`, `history.json` y `logs/errors.log` se crean bajo
+`%APPDATA%\KenjiMusicDownloader\`, no dentro del repositorio ni del ZIP de la
+release.
+
 ## Estructura
 
 ```text
@@ -353,6 +402,7 @@ kenji-music-downloader/
 │   ├── test_updates.py
 │   └── test_security.py
 ├── scripts/
+│   ├── build_windows.ps1
 │   └── build_linux.sh
 ├── kenji-music-downloader.spec
 ├── requirements.txt
@@ -379,6 +429,7 @@ kenji-music-downloader/
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.
 - `kenji-music-downloader.spec`: configuración portable de PyInstaller.
 - `scripts/build_linux.sh`: construcción repetible del ejecutable Linux.
+- `scripts/build_windows.ps1`: pruebas, construcción y ZIP publicable para Windows.
 - `requirements.txt`: dependencias de Python, incluido PyInstaller.
 - `.gitignore`: excluye descargas, entornos y archivos generados.
 
