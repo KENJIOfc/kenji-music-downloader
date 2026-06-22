@@ -5,7 +5,7 @@ YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
 interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
 FFmpeg.
 
-Versión actual: **v1.0.3**.
+Versión actual: **v1.0.5**.
 
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
@@ -31,6 +31,7 @@ Versión actual: **v1.0.3**.
 - Verifica `yt-dlp`, FFmpeg, FFprobe, carpeta de salida y conexión.
 - Puede instalar FFmpeg y FFprobe localmente, siempre con confirmación previa.
 - Incluye temas claro y oscuro y un registro local de errores.
+- Usa una interfaz compacta con desplazamiento vertical para pantallas pequeñas.
 - Busca nuevas versiones mediante la API pública de GitHub Releases.
 - Ofrece menú de Archivo, Herramientas y Ayuda.
 - No incluye playlists, no ejecuta instaladores externos y no modifica el `PATH`.
@@ -82,7 +83,7 @@ FFmpeg manualmente y dejar `ffmpeg` y `ffprobe` disponibles en el `PATH`.
 Las versiones publicadas se distribuyen desde
 [GitHub Releases](https://github.com/KENJIOFC/kenji-music-downloader/releases).
 Para Windows, descarga el archivo con nombre similar a
-`KenjiMusicDownloader-v1.0.3-Windows-x64.zip`, extráelo y ejecuta
+`KenjiMusicDownloader-v1.0.5-Windows-x64.zip`, extráelo y ejecuta
 `KenjiMusicDownloader.exe`.
 
 Esta primera distribución no está firmada digitalmente. Windows SmartScreen o
@@ -116,17 +117,24 @@ El botón **Limpiar** no modifica estas preferencias ni borra archivos. El botó
 **Abrir carpeta** usa el explorador de archivos nativo del sistema y no ejecuta
 texto proporcionado por el usuario como comando.
 
-La ventana usa un tamaño fijo de `1000x750`. El botón de maximizar está
-deshabilitado para que campos, botones, historial y tabla conserven su
-distribución estable. Los controles normales de minimizar y cerrar permanecen
-disponibles.
+La interfaz usa tamaños compactos según el sistema: `1000x720` en Windows y
+`920x680` en Linux. El mínimo recomendado es `850x600` en Windows y `820x580`
+en Linux; si la pantalla es menor, la app se ajusta al espacio disponible. El
+contenido principal tiene scroll vertical, por lo que historial, acciones y
+versión siguen accesibles en laptops pequeñas y en Linux Mint XFCE. El
+historial muestra tres filas por defecto y conserva sus barras vertical y
+horizontal.
 
-## Actualizaciones desde GitHub Releases
+El botón de maximizar permanece deshabilitado para conservar la distribución.
+Los controles normales de minimizar y cerrar siguen disponibles.
+
+## Actualizaciones automáticas
 
 **Ayuda > Buscar actualizaciones...** consulta en segundo plano la última
 release pública de
 [`KENJIOFC/kenji-music-downloader`](https://github.com/KENJIOFC/kenji-music-downloader/releases).
-La ventana permanece disponible mientras se realiza la consulta.
+Cuando existe una versión nueva, la app muestra versión, notas, tamaño y los
+botones **Descargar e instalar**, **Ver en GitHub** y **Cancelar**.
 
 La versión instalada se obtiene de la constante única `APP_VERSION` en
 `src/config.py`. Los tags aceptados usan el formato `vMAJOR.MINOR.PATCH` o
@@ -136,27 +144,95 @@ La versión instalada se obtiene de la constante única `APP_VERSION` en
 - release publicada: `v1.0.1`;
 - resultado: la aplicación avisa que existe una actualización.
 
-La opción **Ayuda > Buscar actualizaciones al iniciar** permite activar o
-desactivar la comprobación automática. Está activada de forma predeterminada y
-se guarda como `check_updates_on_startup` en `settings.json`. Al iniciar:
+Las opciones del menú Ayuda se guardan en `settings.json`:
+
+- `auto_check_updates`: busca al iniciar; activado por defecto.
+- `auto_download_updates`: descarga en segundo plano; desactivado por defecto.
+- `allow_auto_install_updates`: permite ofrecer la instalación inmediatamente
+  después de una descarga automática; desactivado por defecto.
+
+La instalación siempre exige una confirmación visible. Nunca se reemplazan
+archivos silenciosamente.
+
+El flujo automático:
+
+1. elige el asset exacto para Windows o Linux x64;
+2. lee `update.json` si está publicado;
+3. descarga bajo `%APPDATA%\KenjiMusicDownloader\updates\` en Windows o
+   `~/.local/share/KenjiMusicDownloader/updates/` en Linux;
+4. calcula SHA-256 y cancela la instalación si no coincide;
+5. copia y ejecuta `KenjiUpdateInstaller` sin `shell=True` ni terminal visible;
+6. cierra la app, crea backup, reemplaza archivos y la vuelve a abrir;
+7. restaura el backup si la sustitución o el reinicio falla.
+
+La configuración, el historial, los logs, las herramientas locales y las
+descargas no forman parte del payload y se conservan. La app no modifica el
+`PATH`, no instala componentes globales y no solicita permisos administrativos.
+
+Los nombres reconocidos son:
+
+```text
+KenjiMusicDownloader-vX.X.X-Windows-x64.zip
+KenjiMusicDownloader-vX.X.X-Linux-x64.AppImage
+KenjiMusicDownloader-vX.X.X-Linux-x64.tar.gz
+KenjiMusicDownloader-vX.X.X-Linux-x64.zip
+```
+
+En Linux se prefiere AppImage, después TAR.GZ y finalmente ZIP. Si la carpeta
+actual no permite escritura o la app se ejecuta desde el código fuente, se
+muestra el fallback para descargar manualmente desde GitHub Releases. El modo
+desarrollo permite probar búsqueda, selección, descarga y validación, pero no
+sobrescribe el árbol de fuentes.
+
+### Manifest `update.json`
+
+El manifest es opcional, pero se recomienda publicarlo siempre para verificar
+SHA-256. Debe subirse como asset de la misma release:
+
+```json
+{
+  "version": "1.0.5",
+  "assets": {
+    "windows-x64": {
+      "name": "KenjiMusicDownloader-v1.0.5-Windows-x64.zip",
+      "sha256": "HASH_SHA256_WINDOWS"
+    },
+    "linux-x64": {
+      "name": "KenjiMusicDownloader-v1.0.5-Linux-x64.tar.gz",
+      "sha256": "HASH_SHA256_LINUX"
+    }
+  },
+  "notes": "Notas breves de la actualización"
+}
+```
+
+Hay una plantilla en `release/update.example.json`. Los scripts de build crean
+un `dist/update.json` para su plataforma; si una release contiene Windows y
+Linux, combina ambas entradas antes de subir un único manifest.
+
+Sin manifest la app puede continuar únicamente después de advertir que no hay
+un hash fuerte publicado. Las URLs siempre se limitan a los assets del
+repositorio oficial y ZIP/TAR rechazan path traversal y enlaces simbólicos.
+
+La versión `v1.0.4` introduce el helper. Una instalación anterior que todavía
+no incluya `KenjiUpdateInstaller` necesita actualizarse manualmente una sola vez
+a `v1.0.4`; las versiones posteriores ya pueden usar el flujo completo.
+
+Al iniciar:
 
 - si existe una versión nueva, se muestra el aviso;
 - si ya está actualizado, no se interrumpe al usuario;
 - si falla la red o GitHub, el error se registra silenciosamente.
 
-Por ahora la aplicación **no descarga assets, no reemplaza el ejecutable y no
-se actualiza sola**. Si se detecta una versión nueva, ofrece abrir GitHub
-Releases en el navegador para que la descarga sea manual.
-
 Para que la detección funcione debe existir al menos una release publicada en
 GitHub. Si todavía no hay releases, la búsqueda manual muestra una explicación
 clara. Para probar el flujo:
 
-1. publica una release con tag `v1.0.3` y comprueba que la app indique que está
+1. publica una release con tag `v1.0.5` y comprueba que la app indique que está
    actualizada;
 2. publica después una release de prueba con una versión superior, como
-   `v1.0.4`;
-3. vuelve a buscar y la app ofrecerá abrir la página de Releases.
+   `v1.0.6`;
+3. vuelve a buscar y la app ofrecerá descargar e instalar el paquete correcto.
 
 ## Historial, herramientas y registro
 
@@ -258,7 +334,9 @@ Resultados:
 
 ```text
 dist\KenjiMusicDownloader.exe
-dist\KenjiMusicDownloader-v1.0.3-Windows-x64.zip
+dist\KenjiUpdateInstaller.exe
+dist\KenjiMusicDownloader-v1.0.5-Windows-x64.zip
+dist\update.json
 ```
 
 El comando manual equivalente es:
@@ -267,7 +345,7 @@ El comando manual equivalente es:
 .\.venv\Scripts\python.exe -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
 ```
 
-El ejecutable es de un solo archivo, no abre consola negra y no depende de la
+Los dos ejecutables son de un solo archivo, no abren consola negra y no dependen de la
 carpeta de desarrollo de Codex. Las preferencias, el historial y los logs
 continúan guardándose bajo `%APPDATA%`. El empaquetado no requiere que FFmpeg
 esté instalado globalmente: si falta, puede instalarse desde la propia app.
@@ -306,6 +384,15 @@ bash scripts/build_linux.sh
 ./dist/KenjiMusicDownloader
 ```
 
+Resultados publicables:
+
+```text
+dist/KenjiMusicDownloader
+dist/KenjiUpdateInstaller
+dist/KenjiMusicDownloader-v1.0.5-Linux-x64.tar.gz
+dist/update.json
+```
+
 El comando equivalente, si prefieres ejecutarlo manualmente, es:
 
 ```bash
@@ -313,7 +400,8 @@ python -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
 mkdir -p dist/downloads
 ```
 
-El ejecutable se crea en `dist/KenjiMusicDownloader`. FFmpeg continúa siendo
+Los ejecutables se crean en `dist/KenjiMusicDownloader` y
+`dist/KenjiUpdateInstaller`. FFmpeg continúa siendo
 una dependencia del sistema: debe estar instalado en la laptop Linux. El
 ejecutable abre la interfaz gráfica sin una consola adicional. La carpeta
 predeterminada será `dist/downloads`, pero puede cambiarse desde la ventana.
@@ -322,6 +410,7 @@ Para distribuirlo manualmente, copia a la misma carpeta:
 
 ```text
 KenjiMusicDownloader
+KenjiUpdateInstaller
 downloads/
 ```
 
@@ -329,6 +418,7 @@ Si hace falta restaurar el permiso de ejecución:
 
 ```bash
 chmod +x KenjiMusicDownloader
+chmod +x KenjiUpdateInstaller
 ./KenjiMusicDownloader
 ```
 
@@ -404,6 +494,8 @@ release.
 
 Las herramientas descargadas se guardan en
 `%APPDATA%\KenjiMusicDownloader\tools\` y tampoco forman parte del repositorio.
+Los paquetes temporales de actualización usan la subcarpeta `updates/` y no se
+suben a Git.
 
 ## Estructura
 
@@ -422,6 +514,8 @@ kenji-music-downloader/
 │   ├── tool_manager.py
 │   ├── error_log.py
 │   ├── updates.py
+│   ├── update_manager.py
+│   ├── update_installer.py
 │   ├── security.py
 │   └── config.py
 ├── downloads/
@@ -436,11 +530,15 @@ kenji-music-downloader/
 │   ├── test_platform_utils.py
 │   ├── test_user_settings.py
 │   ├── test_updates.py
+│   ├── test_update_manager.py
+│   ├── test_update_installer.py
 │   └── test_security.py
 ├── scripts/
 │   ├── build_windows.ps1
 │   └── build_linux.sh
 ├── kenji-music-downloader.spec
+├── release/
+│   └── update.example.json
 ├── requirements.txt
 ├── README.md
 └── .gitignore
@@ -460,7 +558,11 @@ kenji-music-downloader/
 - `src/tool_manager.py`: resolución, descarga y extracción segura de FFmpeg/FFprobe.
 - `src/error_log.py`: registro local de errores importantes.
 - `src/updates.py`: consulta GitHub Releases, compara versiones y conserva
-  metadatos de assets para una futura actualización automática.
+  metadatos de assets.
+- `src/update_manager.py`: selecciona assets, lee el manifest, descarga, valida
+  SHA-256 y lanza el helper.
+- `src/update_installer.py`: helper separado con extracción segura, backup,
+  reemplazo, rollback y reinicio.
 - `src/config.py`: versión, rutas portables y validación de la carpeta de salida.
 - `tests/test_security.py`: verifica que se acepten y rechacen los enlaces correctos.
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.

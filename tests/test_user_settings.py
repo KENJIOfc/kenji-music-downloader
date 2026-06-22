@@ -39,7 +39,9 @@ class UserSettingsTests(unittest.TestCase):
                 output_format="flac",
                 audio_quality="high",
                 theme="dark",
-                check_updates_on_startup=False,
+                auto_check_updates=False,
+                auto_download_updates=True,
+                allow_auto_install_updates=True,
             )
 
             save_user_settings(expected, settings_path)
@@ -72,7 +74,9 @@ class UserSettingsTests(unittest.TestCase):
 
             loaded = load_user_settings(settings_path)
             self.assertEqual(loaded.theme, DEFAULT_THEME)
-            self.assertTrue(loaded.check_updates_on_startup)
+            self.assertTrue(loaded.auto_check_updates)
+            self.assertFalse(loaded.auto_download_updates)
+            self.assertFalse(loaded.allow_auto_install_updates)
 
     def test_unsupported_keys_return_safe_defaults(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -128,7 +132,31 @@ class UserSettingsTests(unittest.TestCase):
             )
 
             loaded = load_user_settings(settings_path)
-            self.assertTrue(loaded.check_updates_on_startup)
+            self.assertTrue(loaded.auto_check_updates)
+            self.assertFalse(loaded.auto_download_updates)
+            self.assertFalse(loaded.allow_auto_install_updates)
+
+    def test_migrates_legacy_update_preference(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            settings_path = Path(temporary_directory) / "settings.json"
+            settings_path.write_text(
+                json.dumps(
+                    {
+                        "output_directory": temporary_directory,
+                        "output_format": "mp3",
+                        "audio_quality": "medium",
+                        "theme": "light",
+                        "check_updates_on_startup": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = load_user_settings(settings_path)
+
+            self.assertFalse(loaded.auto_check_updates)
+            self.assertFalse(loaded.auto_download_updates)
+            self.assertFalse(loaded.allow_auto_install_updates)
 
 
 if __name__ == "__main__":

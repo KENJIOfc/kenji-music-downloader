@@ -1,6 +1,7 @@
 """Interfaz gráfica de Kenji Music Downloader construida con Tkinter."""
 
 from pathlib import Path
+import platform
 import queue
 import threading
 from time import perf_counter
@@ -27,7 +28,7 @@ from src.download_history import (
     load_download_history,
     remove_history_entry,
 )
-from src.error_log import ErrorLogReadError, log_error, read_error_log
+from src.error_log import ErrorLogReadError, log_error, log_info, read_error_log
 from src.config import (
     APP_DESCRIPTION,
     APP_NAME,
@@ -57,6 +58,22 @@ from src.tool_manager import (
     missing_ffmpeg_tools,
 )
 from src.updates import GITHUB_RELEASES_URL, UpdateResult, check_for_updates
+from src.update_manager import (
+    DownloadedUpdate,
+    UpdateCancelledError,
+    UpdateDownloadError,
+    UpdateDownloadProgress,
+    UpdateInstallError,
+    UpdatePackage,
+    UpdatePackageError,
+    consume_update_result,
+    detect_installation_context,
+    download_update,
+    ensure_installation_writable,
+    launch_update_installer,
+    prepare_update_package,
+    select_release_asset,
+)
 from src.user_settings import (
     DEFAULT_THEME,
     SettingsError,
@@ -101,21 +118,46 @@ THEME_PALETTES = {
         "border": "#46505f",
     },
 }
-INITIAL_WINDOW_SIZE = (1000, 750)
-MINIMUM_WINDOW_SIZE = (850, 650)
+WINDOW_SIZES_BY_SYSTEM = {
+    "Windows": ((1000, 720), (850, 600)),
+    "Linux": ((920, 680), (820, 580)),
+}
+DEFAULT_WINDOW_SIZES = ((960, 700), (820, 580))
+SCREEN_EDGE_MARGINS = (40, 80)
 WINDOW_RESIZABLE = (False, False)
-MAXIMUM_CONTENT_SIZE = (1040, 850)
-CONTENT_MARGINS = (32, 24)
+HISTORY_VISIBLE_ROWS = 3
 
 
-def calculate_content_size(window_width: int, window_height: int) -> tuple[int, int]:
-    """Limita el contenido para evitar estiramiento en pantallas grandes."""
-    available_width = max(1, window_width - CONTENT_MARGINS[0])
-    available_height = max(1, window_height - CONTENT_MARGINS[1])
-    return (
-        min(MAXIMUM_CONTENT_SIZE[0], available_width),
-        min(MAXIMUM_CONTENT_SIZE[1], available_height),
+def window_sizes_for_system(
+    system_name: str | None = None,
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Devuelve los tamaños inicial y mínimo adecuados para cada plataforma."""
+    return WINDOW_SIZES_BY_SYSTEM.get(
+        system_name or platform.system(),
+        DEFAULT_WINDOW_SIZES,
     )
+
+
+def fit_window_to_screen(
+    initial_size: tuple[int, int],
+    minimum_size: tuple[int, int],
+    screen_size: tuple[int, int],
+) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Ajusta la ventana a pantallas pequeñas sin ocultar controles importantes."""
+    max_width = max(640, screen_size[0] - SCREEN_EDGE_MARGINS[0])
+    max_height = max(480, screen_size[1] - SCREEN_EDGE_MARGINS[1])
+    fitted_size = (
+        min(initial_size[0], max_width),
+        min(initial_size[1], max_height),
+    )
+    fitted_minimum = (
+        min(minimum_size[0], fitted_size[0]),
+        min(minimum_size[1], fitted_size[1]),
+    )
+    return fitted_size, fitted_minimum
+
+
+INITIAL_WINDOW_SIZE, MINIMUM_WINDOW_SIZE = window_sizes_for_system()
 
 
 def format_bytes(value: int | float | None) -> str:
@@ -189,6 +231,14 @@ class KenjiMusicDownloaderGUI:
         self.tool_install_running = False
         self.update_check_running = False
         self.update_check_manual = False
+        self.update_operation_running = False
+        self.update_started_automatically = False
+        self.update_cancel_event: threading.Event | None = None
+        self.pending_update_result: UpdateResult | None = None
+        self.pending_update_package: UpdatePackage | None = None
+        self.downloaded_update: DownloadedUpdate | None = None
+        self.update_dialog: tk.Toplevel | None = None
+        self.update_installing = False
         self.style = ttk.Style(self.root)
         self.managed_menus: list[tk.Menu] = []
         self.history_item_entries: dict[str, DownloadHistoryEntry] = {}
@@ -211,9 +261,17 @@ class KenjiMusicDownloaderGUI:
         self.format_value = tk.StringVar(value=saved_format.selector_label)
         self.quality_value = tk.StringVar(value=saved_quality.selector_label)
         self.theme_value = tk.StringVar(value=saved_settings.theme)
-        self.check_updates_on_startup_value = tk.BooleanVar(
-            value=saved_settings.check_updates_on_startup
+        self.auto_check_updates_value = tk.BooleanVar(
+            value=saved_settings.auto_check_updates
         )
+        self.auto_download_updates_value = tk.BooleanVar(
+            value=saved_settings.auto_download_updates
+        )
+        self.allow_auto_install_updates_value = tk.BooleanVar(
+            value=saved_settings.allow_auto_install_updates
+        )
+        self.update_dialog_status_value = tk.StringVar(value="")
+        self.update_dialog_progress_value = tk.DoubleVar(value=0.0)
         self.status_value = tk.StringVar(value="Listo para descargar.")
         self.percentage_value = tk.StringVar(value="0 %")
         self.video_title_value = tk.StringVar(value="Esperando información...")
@@ -233,38 +291,71 @@ class KenjiMusicDownloaderGUI:
         self._build_menu()
         self._apply_theme(saved_settings.theme, save_preference=False)
         self._refresh_history_tree()
-        self.root.after_idle(self._resize_main_container)
+        self.root.after_idle(self._update_main_scroll_region)
         self.root.after(EVENT_POLL_INTERVAL_MS, self._process_events)
         self.root.after(
             CONNECTION_MONITOR_INTERVAL_MS,
             self._monitor_connection_delay,
         )
         self.root.after(1_500, self._start_startup_update_check)
+        self.root.after(700, self._show_last_update_result)
 
     def _configure_window(self) -> None:
         """Configura tamaño, título y comportamiento general de la ventana."""
+        initial_size, minimum_size = window_sizes_for_system()
+        window_size, fitted_minimum = fit_window_to_screen(
+            initial_size,
+            minimum_size,
+            (self.root.winfo_screenwidth(), self.root.winfo_screenheight()),
+        )
         self.root.title(APP_NAME)
-        self.root.geometry(f"{INITIAL_WINDOW_SIZE[0]}x{INITIAL_WINDOW_SIZE[1]}")
-        self.root.minsize(*MINIMUM_WINDOW_SIZE)
-        self.root.maxsize(*INITIAL_WINDOW_SIZE)
-        # En Windows esto deshabilita el botón de maximizar y conserva minimizar/cerrar.
+        self.root.geometry(f"{window_size[0]}x{window_size[1]}")
+        self.root.minsize(*fitted_minimum)
+        self.root.maxsize(*window_size)
+        # Esto deshabilita maximizar y conserva minimizar/cerrar.
         self.root.resizable(*WINDOW_RESIZABLE)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build_widgets(self) -> None:
         """Crea los controles usando únicamente componentes estándar de Tkinter."""
-        container = ttk.Frame(self.root, padding=18)
+        scroll_host = ttk.Frame(self.root)
+        scroll_host.pack(fill="both", expand=True)
+        scroll_host.columnconfigure(0, weight=1)
+        scroll_host.rowconfigure(0, weight=1)
+
+        # El lienzo mantiene accesibles las secciones inferiores en pantallas bajas.
+        self.main_canvas = tk.Canvas(
+            scroll_host,
+            borderwidth=0,
+            highlightthickness=0,
+        )
+        self.main_canvas.grid(row=0, column=0, sticky="nsew")
+        self.main_scrollbar = ttk.Scrollbar(
+            scroll_host,
+            orient="vertical",
+            command=self.main_canvas.yview,
+        )
+        self.main_scrollbar.grid(row=0, column=1, sticky="ns")
+        self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
+
+        container = ttk.Frame(self.main_canvas, padding=(14, 9, 14, 8))
         self.main_container = container
-        container.place(relx=0.5, rely=0.5, anchor="center")
-        container.grid_propagate(False)
-        self.root.bind("<Configure>", self._resize_main_container, add="+")
+        self.main_canvas_window = self.main_canvas.create_window(
+            (0, 0),
+            window=container,
+            anchor="nw",
+        )
+        container.bind("<Configure>", self._update_main_scroll_region, add="+")
+        self.main_canvas.bind("<Configure>", self._resize_scroll_content, add="+")
+        self.root.bind_all("<MouseWheel>", self._on_main_mousewheel, add="+")
+        self.root.bind_all("<Button-4>", self._on_main_mousewheel, add="+")
+        self.root.bind_all("<Button-5>", self._on_main_mousewheel, add="+")
         container.columnconfigure(0, weight=1)
-        container.rowconfigure(9, weight=1)
 
         title = ttk.Label(
             container,
             text=APP_NAME,
-            font=("TkDefaultFont", 18, "bold"),
+            font=("TkDefaultFont", 17, "bold"),
         )
         title.grid(row=0, column=0, columnspan=3, sticky="w")
 
@@ -272,13 +363,13 @@ class KenjiMusicDownloaderGUI:
             container,
             text="Descarga el audio de un video individual de YouTube.",
         )
-        subtitle.grid(row=1, column=0, columnspan=3, sticky="w", pady=(3, 12))
+        subtitle.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
 
         ttk.Label(container, text="Enlace de YouTube:").grid(
             row=2, column=0, columnspan=3, sticky="w"
         )
         url_row = ttk.Frame(container)
-        url_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(5, 12))
+        url_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(3, 8))
         url_row.columnconfigure(0, weight=1)
         self.url_entry = ttk.Entry(url_row, textvariable=self.url_value)
         self.url_entry.grid(row=0, column=0, sticky="ew")
@@ -288,14 +379,14 @@ class KenjiMusicDownloaderGUI:
             command=self._paste_link,
             width=14,
         )
-        self.paste_button.grid(row=0, column=1, padx=(10, 0))
+        self.paste_button.grid(row=0, column=1, padx=(7, 0))
         self.clear_button = ttk.Button(
             url_row,
             text="Limpiar",
             command=self._clear_interface,
             width=12,
         )
-        self.clear_button.grid(row=0, column=2, padx=(8, 0))
+        self.clear_button.grid(row=0, column=2, padx=(5, 0))
 
         ttk.Label(container, text="Carpeta de salida:").grid(
             row=4, column=0, columnspan=3, sticky="w"
@@ -305,7 +396,7 @@ class KenjiMusicDownloaderGUI:
             textvariable=self.output_value,
             state="readonly",
         )
-        self.output_entry.grid(row=5, column=0, sticky="ew", pady=(5, 14))
+        self.output_entry.grid(row=5, column=0, sticky="ew", pady=(3, 9))
 
         self.folder_button = ttk.Button(
             container,
@@ -313,7 +404,7 @@ class KenjiMusicDownloaderGUI:
             command=self._select_output_directory,
             width=16,
         )
-        self.folder_button.grid(row=5, column=1, padx=(10, 0), pady=(5, 14))
+        self.folder_button.grid(row=5, column=1, padx=(7, 0), pady=(3, 9))
 
         self.open_folder_button = ttk.Button(
             container,
@@ -321,10 +412,10 @@ class KenjiMusicDownloaderGUI:
             command=self._open_output_directory,
             width=14,
         )
-        self.open_folder_button.grid(row=5, column=2, padx=(8, 0), pady=(5, 14))
+        self.open_folder_button.grid(row=5, column=2, padx=(5, 0), pady=(3, 9))
 
         selectors = ttk.Frame(container)
-        selectors.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 14))
+        selectors.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 9))
         selectors.columnconfigure(0, weight=1)
         selectors.columnconfigure(1, weight=1)
         ttk.Label(selectors, text="Formato de salida:").grid(
@@ -343,7 +434,7 @@ class KenjiMusicDownloaderGUI:
             row=1,
             column=0,
             sticky="ew",
-            pady=(6, 0),
+            pady=(3, 0),
         )
         self.quality_selector = ttk.Combobox(
             selectors,
@@ -356,7 +447,7 @@ class KenjiMusicDownloaderGUI:
             column=1,
             sticky="ew",
             padx=(12, 0),
-            pady=(6, 0),
+            pady=(3, 0),
         )
         self.format_selector.bind("<<ComboboxSelected>>", self._preference_changed)
         self.quality_selector.bind("<<ComboboxSelected>>", self._preference_changed)
@@ -374,8 +465,8 @@ class KenjiMusicDownloaderGUI:
             row=0, column=1, padx=(10, 0)
         )
 
-        details = ttk.LabelFrame(container, text="Detalles del proceso", padding=10)
-        details.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(12, 14))
+        details = ttk.LabelFrame(container, text="Detalles del proceso", padding=7)
+        details.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 9))
         details.columnconfigure(1, weight=1)
         details.columnconfigure(3, weight=1)
         details.columnconfigure(5, weight=1)
@@ -385,48 +476,48 @@ class KenjiMusicDownloaderGUI:
             row=0, column=1, columnspan=5, sticky="w", padx=(8, 0)
         )
 
-        ttk.Label(details, text="Video:").grid(row=1, column=0, sticky="nw", pady=(6, 0))
+        ttk.Label(details, text="Video:").grid(row=1, column=0, sticky="nw", pady=(3, 0))
         ttk.Label(
             details,
             textvariable=self.video_title_value,
             wraplength=560,
-        ).grid(row=1, column=1, columnspan=5, sticky="w", padx=(8, 0), pady=(6, 0))
+        ).grid(row=1, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(3, 0))
 
-        ttk.Label(details, text="Tamaño:").grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Label(details, text="Tamaño:").grid(row=2, column=0, sticky="w", pady=(4, 0))
         ttk.Label(details, textvariable=self.size_value).grid(
-            row=2, column=1, sticky="w", padx=(8, 18), pady=(8, 0)
+            row=2, column=1, sticky="w", padx=(6, 14), pady=(4, 0)
         )
-        ttk.Label(details, text="Velocidad:").grid(row=2, column=2, sticky="w", pady=(8, 0))
+        ttk.Label(details, text="Velocidad:").grid(row=2, column=2, sticky="w", pady=(4, 0))
         ttk.Label(details, textvariable=self.speed_value).grid(
-            row=2, column=3, sticky="w", padx=(8, 18), pady=(8, 0)
+            row=2, column=3, sticky="w", padx=(6, 14), pady=(4, 0)
         )
         ttk.Label(details, text="Tiempo restante:").grid(
-            row=2, column=4, sticky="w", pady=(8, 0)
+            row=2, column=4, sticky="w", pady=(4, 0)
         )
         ttk.Label(details, textvariable=self.eta_value).grid(
-            row=2, column=5, sticky="w", padx=(8, 0), pady=(8, 0)
+            row=2, column=5, sticky="w", padx=(6, 0), pady=(4, 0)
         )
 
         ttk.Label(details, text="Tiempos:").grid(
-            row=3, column=0, sticky="nw", pady=(8, 0)
+            row=3, column=0, sticky="nw", pady=(4, 0)
         )
         ttk.Label(
             details,
             textvariable=self.timings_value,
             wraplength=580,
-        ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(8, 0), pady=(8, 0))
+        ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(4, 0))
 
         history_frame = ttk.LabelFrame(
             container,
             text="Historial de descargas (últimas 20)",
-            padding=8,
+            padding=6,
         )
         history_frame.grid(
             row=9,
             column=0,
             columnspan=3,
-            sticky="nsew",
-            pady=(0, 14),
+            sticky="ew",
+            pady=(0, 8),
         )
         history_frame.columnconfigure(0, weight=1)
         history_frame.rowconfigure(0, weight=1)
@@ -436,7 +527,7 @@ class KenjiMusicDownloaderGUI:
             history_frame,
             columns=history_columns,
             show="headings",
-            height=3,
+            height=HISTORY_VISIBLE_ROWS,
         )
         history_headings = {
             "name": "Archivo / canción",
@@ -446,11 +537,11 @@ class KenjiMusicDownloaderGUI:
             "path": "Ruta",
         }
         history_widths = {
-            "name": 300,
+            "name": 280,
             "format": 80,
             "quality": 105,
             "status": 105,
-            "path": 520,
+            "path": 460,
         }
         for column in history_columns:
             self.history_tree.heading(column, text=history_headings[column])
@@ -486,32 +577,32 @@ class KenjiMusicDownloaderGUI:
         self.history_tree.bind("<Button-3>", self._show_history_context_menu)
 
         history_actions = ttk.Frame(history_frame)
-        history_actions.grid(row=2, column=0, columnspan=2, pady=(8, 0))
+        history_actions.grid(row=2, column=0, columnspan=2, pady=(5, 0))
 
         ttk.Button(
             history_actions,
             text="Abrir seleccionado",
             command=self._open_selected_history_file,
-            width=18,
-        ).grid(row=0, column=0, padx=(0, 4))
+            width=17,
+        ).grid(row=0, column=0, padx=(0, 3))
         ttk.Button(
             history_actions,
             text="Abrir su carpeta",
             command=self._open_selected_history_folder,
-            width=18,
-        ).grid(row=0, column=1, padx=4)
+            width=17,
+        ).grid(row=0, column=1, padx=3)
         ttk.Button(
             history_actions,
             text="Copiar ruta",
             command=self._copy_selected_history_path,
-            width=18,
-        ).grid(row=0, column=2, padx=4)
+            width=17,
+        ).grid(row=0, column=2, padx=3)
         ttk.Button(
             history_actions,
             text="Eliminar entrada",
             command=self._delete_selected_history_entry,
-            width=18,
-        ).grid(row=0, column=3, padx=(4, 0))
+            width=17,
+        ).grid(row=0, column=3, padx=(3, 0))
 
         self.history_context_menu = tk.Menu(self.root, tearoff=False)
         self.history_context_menu.add_command(
@@ -567,25 +658,46 @@ class KenjiMusicDownloaderGUI:
             row=11,
             column=0,
             columnspan=3,
-            pady=(12, 0),
+            pady=(7, 0),
         )
         self.url_entry.focus_set()
 
-    def _resize_main_container(self, event: tk.Event | None = None) -> None:
-        """Centra el contenido y respeta sus límites máximos al redimensionar."""
-        if event is not None and event.widget is not self.root:
-            return
-        content_width, content_height = calculate_content_size(
-            self.root.winfo_width(),
-            self.root.winfo_height(),
-        )
-        self.main_container.place_configure(
-            relx=0.5,
-            rely=0.5,
-            anchor="center",
-            width=content_width,
-            height=content_height,
-        )
+    def _update_main_scroll_region(self, _event: tk.Event | None = None) -> None:
+        """Mantiene actualizado el recorrido vertical del contenido principal."""
+        region = self.main_canvas.bbox("all")
+        if region is not None:
+            self.main_canvas.configure(scrollregion=region)
+
+    def _resize_scroll_content(self, event: tk.Event) -> None:
+        """Usa el ancho visible sin dejar que el contenido salga de la ventana."""
+        self.main_canvas.itemconfigure(self.main_canvas_window, width=event.width)
+        self._update_main_scroll_region()
+
+    def _on_main_mousewheel(self, event: tk.Event) -> str | None:
+        """Desplaza la interfaz con la rueda tanto en Windows como en Linux/X11."""
+        try:
+            if event.widget.winfo_toplevel() is not self.root:
+                return None
+            widget_class = event.widget.winfo_class()
+        except (AttributeError, tk.TclError):
+            return None
+
+        # Treeview y Combobox conservan su desplazamiento nativo.
+        if widget_class in {"Treeview", "TCombobox"}:
+            return None
+
+        if getattr(event, "num", None) == 4:
+            direction = -1
+        elif getattr(event, "num", None) == 5:
+            direction = 1
+        else:
+            delta = getattr(event, "delta", 0)
+            if not delta:
+                return None
+            direction = -1 if delta > 0 else 1
+
+        self.main_canvas.yview_scroll(direction, "units")
+        return "break"
 
     def _build_menu(self) -> None:
         """Crea un menú pequeño con acciones equivalentes a los botones."""
@@ -640,7 +752,17 @@ class KenjiMusicDownloaderGUI:
         )
         help_menu.add_checkbutton(
             label="Buscar actualizaciones al iniciar",
-            variable=self.check_updates_on_startup_value,
+            variable=self.auto_check_updates_value,
+            command=self._startup_update_preference_changed,
+        )
+        help_menu.add_checkbutton(
+            label="Descargar actualizaciones automáticamente",
+            variable=self.auto_download_updates_value,
+            command=self._startup_update_preference_changed,
+        )
+        help_menu.add_checkbutton(
+            label="Permitir instalación automática",
+            variable=self.allow_auto_install_updates_value,
             command=self._startup_update_preference_changed,
         )
         help_menu.add_command(
@@ -677,6 +799,7 @@ class KenjiMusicDownloaderGUI:
             pass
 
         self.root.configure(background=palette["background"])
+        self.main_canvas.configure(background=palette["background"])
         self.style.configure(
             ".",
             background=palette["background"],
@@ -703,7 +826,7 @@ class KenjiMusicDownloaderGUI:
         )
         self.style.configure(
             "TButton",
-            padding=(9, 6),
+            padding=(7, 3),
             background=palette["surface"],
             foreground=palette["foreground"],
         )
@@ -736,7 +859,7 @@ class KenjiMusicDownloaderGUI:
             fieldbackground=palette["surface"],
             foreground=palette["foreground"],
             bordercolor=palette["border"],
-            rowheight=25,
+            rowheight=22,
         )
         self.style.map(
             "Treeview",
@@ -747,7 +870,7 @@ class KenjiMusicDownloaderGUI:
             "Treeview.Heading",
             background=palette["selected"],
             foreground=palette["foreground"],
-            padding=(6, 5),
+            padding=(5, 3),
         )
         self.style.configure(
             "Horizontal.TProgressbar",
@@ -1323,12 +1446,12 @@ class KenjiMusicDownloaderGUI:
         )
 
     def _startup_update_preference_changed(self) -> None:
-        """Guarda el estado del selector de búsqueda automática."""
+        """Guarda las preferencias de actualización sin iniciar una instalación."""
         self._save_preferences(show_error=True)
 
     def _start_startup_update_check(self) -> None:
         """Inicia silenciosamente la consulta automática si está habilitada."""
-        if self.check_updates_on_startup_value.get():
+        if self.auto_check_updates_value.get():
             self._start_update_check(manual=False)
 
     def _start_manual_update_check(self) -> None:
@@ -1356,6 +1479,7 @@ class KenjiMusicDownloaderGUI:
 
     def _update_check_worker(self) -> None:
         """Consulta GitHub sin acceder a widgets desde el hilo secundario."""
+        log_info("Actualizaciones", f"Inicio de búsqueda desde v{APP_VERSION}.")
         try:
             result = check_for_updates(APP_VERSION)
         except Exception as error:
@@ -1370,6 +1494,11 @@ class KenjiMusicDownloaderGUI:
                 current_version=APP_VERSION,
                 error_type="unexpected_error",
                 error_message="No se pudo comprobar si hay actualizaciones.",
+            )
+        if result.success:
+            log_info(
+                "Actualizaciones",
+                f"Versión encontrada: v{result.latest_version}.",
             )
         self.events.put(("update_check_result", result))
 
@@ -1392,17 +1521,12 @@ class KenjiMusicDownloaderGUI:
 
         if result.update_available:
             self.status_value.set("Nueva versión disponible.")
-            should_open = messagebox.askyesno(
-                "Actualización disponible",
-                "Hay una nueva versión disponible.\n\n"
-                f"Versión actual: v{result.current_version}\n"
-                f"Nueva versión: v{result.latest_version}\n\n"
-                "Puedes descargarla manualmente desde GitHub Releases.\n\n"
-                "¿Quieres abrir la página de releases?",
-                parent=self.root,
-            )
-            if should_open:
-                self._open_release_page(result.release_url)
+            self._show_update_dialog(result)
+            if not manual and self.auto_download_updates_value.get():
+                self.root.after(
+                    150,
+                    lambda: self._begin_update_preparation(automatic=True),
+                )
             return
 
         if manual:
@@ -1413,6 +1537,325 @@ class KenjiMusicDownloaderGUI:
                 f"Versión actual: v{result.current_version}",
                 parent=self.root,
             )
+
+    def _show_update_dialog(self, result: UpdateResult) -> None:
+        """Presenta versión, notas, tamaño y acciones sin bloquear la ventana."""
+        if self.update_dialog and self.update_dialog.winfo_exists():
+            self.update_dialog.lift()
+            return
+
+        self.pending_update_result = result
+        self.pending_update_package = None
+        self.downloaded_update = None
+        self.update_dialog_status_value.set("Actualización disponible.")
+        self.update_dialog_progress_value.set(0.0)
+
+        dialog = tk.Toplevel(self.root)
+        self.update_dialog = dialog
+        dialog.title("Actualización disponible")
+        dialog.geometry("620x470")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.protocol("WM_DELETE_WINDOW", self._close_update_dialog)
+
+        container = ttk.Frame(dialog, padding=18)
+        container.pack(fill="both", expand=True)
+        ttk.Label(
+            container,
+            text="Hay una nueva versión disponible",
+            font=("TkDefaultFont", 14, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            container,
+            text=(
+                f"Versión actual: v{result.current_version}\n"
+                f"Nueva versión: v{result.latest_version}"
+            ),
+        ).pack(anchor="w", pady=(10, 6))
+
+        size_text = "Tamaño: no disponible"
+        try:
+            _platform_key, asset, _kind = select_release_asset(result)
+            if asset.size is not None:
+                size_text = f"Tamaño: {format_bytes(asset.size)}"
+        except UpdatePackageError:
+            asset = None
+        ttk.Label(container, text=size_text).pack(anchor="w", pady=(0, 8))
+        ttk.Label(container, text="Notas de versión:").pack(anchor="w")
+
+        palette = THEME_PALETTES[self.theme_value.get()]
+        notes = tk.Text(
+            container,
+            height=10,
+            wrap="word",
+            background=palette["surface"],
+            foreground=palette["foreground"],
+            insertbackground=palette["foreground"],
+            padx=8,
+            pady=8,
+        )
+        notes.pack(fill="both", expand=True, pady=(4, 10))
+        notes.insert("1.0", (result.release_notes or "Sin notas publicadas.")[:6_000])
+        notes.configure(state="disabled")
+
+        self.update_progress_bar = ttk.Progressbar(
+            container,
+            variable=self.update_dialog_progress_value,
+            maximum=100,
+            mode="determinate",
+        )
+        self.update_progress_bar.pack(fill="x")
+        ttk.Label(
+            container,
+            textvariable=self.update_dialog_status_value,
+            wraplength=580,
+        ).pack(anchor="w", pady=(6, 10))
+
+        buttons = ttk.Frame(container)
+        buttons.pack(fill="x")
+        self.update_install_button = ttk.Button(
+            buttons,
+            text="Descargar e instalar",
+            command=lambda: self._begin_update_preparation(automatic=False),
+            state="normal" if asset else "disabled",
+        )
+        self.update_install_button.pack(side="left")
+        self.update_github_button = ttk.Button(
+            buttons,
+            text="Ver en GitHub",
+            command=lambda: self._open_release_page(result.release_url),
+        )
+        self.update_github_button.pack(side="left", padx=8)
+        self.update_cancel_button = ttk.Button(
+            buttons,
+            text="Cancelar",
+            command=self._cancel_update_operation,
+        )
+        self.update_cancel_button.pack(side="right")
+
+        if asset is None:
+            self.update_dialog_status_value.set(
+                "No hay paquete de actualización disponible para este sistema operativo."
+            )
+
+    def _close_update_dialog(self) -> None:
+        """Cierra el diálogo o solicita cancelar una descarga activa."""
+        if self.update_operation_running:
+            self._cancel_update_operation()
+            return
+        if self.update_dialog and self.update_dialog.winfo_exists():
+            self.update_dialog.destroy()
+        self.update_dialog = None
+
+    def _begin_update_preparation(self, automatic: bool = False) -> None:
+        """Resuelve manifest y permisos en un hilo antes de descargar."""
+        if self.update_operation_running or not self.pending_update_result:
+            return
+        self.update_started_automatically = automatic
+        self.update_operation_running = True
+        self.update_cancel_event = threading.Event()
+        self.update_dialog_status_value.set("Preparando actualización…")
+        self.update_progress_bar.configure(mode="indeterminate")
+        self.update_progress_bar.start(12)
+        self.update_install_button.configure(state="disabled")
+        worker = threading.Thread(
+            target=self._update_prepare_worker,
+            args=(self.pending_update_result,),
+            daemon=True,
+        )
+        worker.start()
+
+    def _update_prepare_worker(self, result: UpdateResult) -> None:
+        try:
+            package = prepare_update_package(result)
+            context = detect_installation_context()
+            ensure_installation_writable(context)
+        except (UpdatePackageError, UpdateInstallError) as error:
+            self.events.put(("update_operation_error", str(error)))
+        except Exception as error:
+            log_error("Actualizaciones", "Falló la preparación.", error)
+            self.events.put(
+                (
+                    "update_operation_error",
+                    "No fue posible preparar la actualización automática.",
+                )
+            )
+        else:
+            self.events.put(("update_package_ready", package))
+
+    def _finish_update_package_ready(self, package: UpdatePackage) -> None:
+        """Pide confirmación extra cuando la release no publica SHA-256."""
+        if self.update_cancel_event and self.update_cancel_event.is_set():
+            self._finish_update_cancelled()
+            return
+        self.pending_update_package = package
+        self.update_progress_bar.stop()
+        self.update_progress_bar.configure(mode="determinate")
+        if not package.expected_sha256:
+            continue_without_hash = messagebox.askyesno(
+                "Integridad no verificada",
+                "La release no incluye un SHA-256 fuerte para este paquete.\n\n"
+                "La descarga sigue limitada al repositorio oficial, pero no se puede "
+                "comprobar su hash publicado. ¿Quieres continuar?",
+                parent=self.update_dialog or self.root,
+            )
+            if not continue_without_hash:
+                self._finish_update_cancelled()
+                return
+        self._start_update_download(package)
+
+    def _start_update_download(self, package: UpdatePackage) -> None:
+        self.update_dialog_status_value.set("Descargando actualización…")
+        self.update_dialog_progress_value.set(0.0)
+        worker = threading.Thread(
+            target=self._update_download_worker,
+            args=(package, self.update_cancel_event),
+            daemon=True,
+        )
+        worker.start()
+
+    def _update_download_worker(
+        self,
+        package: UpdatePackage,
+        cancel_event: threading.Event | None,
+    ) -> None:
+        try:
+            downloaded = download_update(
+                package,
+                progress_callback=lambda progress: self.events.put(
+                    ("update_download_progress", progress)
+                ),
+                cancel_event=cancel_event,
+            )
+        except UpdateCancelledError:
+            self.events.put(("update_operation_cancelled", None))
+        except (UpdateDownloadError, UpdatePackageError) as error:
+            self.events.put(("update_operation_error", str(error)))
+        except Exception as error:
+            log_error("Actualizaciones", "Falló la descarga.", error)
+            self.events.put(
+                (
+                    "update_operation_error",
+                    "No se pudo descargar la actualización.",
+                )
+            )
+        else:
+            self.events.put(("update_download_complete", downloaded))
+
+    def _show_update_download_progress(self, progress: UpdateDownloadProgress) -> None:
+        """Actualiza porcentaje y bytes exclusivamente desde el hilo principal."""
+        if progress.percentage is None:
+            self.update_progress_bar.configure(mode="indeterminate")
+            self.update_progress_bar.start(12)
+            percentage_text = ""
+        else:
+            self.update_progress_bar.stop()
+            self.update_progress_bar.configure(mode="determinate")
+            self.update_dialog_progress_value.set(progress.percentage)
+            percentage_text = f" {progress.percentage:.0f}%"
+        total = format_bytes(progress.total_bytes)
+        self.update_dialog_status_value.set(
+            f"Descargando actualización…{percentage_text} "
+            f"({format_bytes(progress.downloaded_bytes)} / {total})"
+        )
+
+    def _finish_update_download(self, downloaded: DownloadedUpdate) -> None:
+        """Conserva el paquete y nunca instala sin una confirmación visible."""
+        self.downloaded_update = downloaded
+        self.update_operation_running = False
+        self.update_cancel_event = None
+        self.update_progress_bar.stop()
+        self.update_progress_bar.configure(mode="determinate")
+        self.update_dialog_progress_value.set(100.0)
+        verified_text = "SHA-256 verificado" if downloaded.hash_verified else "sin SHA-256 publicado"
+        self.update_dialog_status_value.set(
+            f"Actualización descargada correctamente ({verified_text})."
+        )
+        self.update_install_button.configure(
+            text="Instalar actualización",
+            command=self._confirm_install_downloaded_update,
+            state="normal",
+        )
+        if (
+            not self.update_started_automatically
+            or self.allow_auto_install_updates_value.get()
+        ):
+            self._confirm_install_downloaded_update()
+
+    def _confirm_install_downloaded_update(self) -> None:
+        """La instalación siempre requiere esta confirmación final."""
+        if not self.downloaded_update:
+            return
+        should_install = messagebox.askyesno(
+            "Instalar actualización",
+            "La actualización se descargó correctamente.\n\n"
+            "La aplicación se cerrará y reiniciará para instalarla. "
+            "¿Quieres continuar ahora?",
+            parent=self.update_dialog or self.root,
+        )
+        if not should_install:
+            self.update_dialog_status_value.set(
+                "Actualización descargada. Puedes instalarla cuando estés listo."
+            )
+            return
+        try:
+            self._save_preferences(show_error=True)
+            launch_update_installer(self.downloaded_update)
+        except UpdateInstallError as error:
+            log_error("Actualizaciones", str(error), error)
+            messagebox.showerror(
+                "No se pudo instalar",
+                f"{error}\n\nPuedes usar Ver en GitHub como alternativa.",
+                parent=self.update_dialog or self.root,
+            )
+            return
+        self.update_installing = True
+        self.status_value.set("Reiniciando para instalar la actualización…")
+        self.root.after(150, self.root.destroy)
+
+    def _cancel_update_operation(self) -> None:
+        if self.update_operation_running and self.update_cancel_event:
+            self.update_cancel_event.set()
+            self.update_dialog_status_value.set("Cancelando actualización…")
+            self.update_cancel_button.configure(state="disabled")
+            return
+        self._close_update_dialog()
+
+    def _finish_update_cancelled(self) -> None:
+        self.update_operation_running = False
+        self.update_cancel_event = None
+        self.update_progress_bar.stop()
+        self.update_progress_bar.configure(mode="determinate")
+        self.update_dialog_progress_value.set(0.0)
+        self.update_dialog_status_value.set("La actualización fue cancelada.")
+        self.update_install_button.configure(state="normal")
+        self.update_cancel_button.configure(state="normal")
+
+    def _finish_update_operation_error(self, message: str) -> None:
+        self.update_operation_running = False
+        self.update_cancel_event = None
+        self.update_progress_bar.stop()
+        self.update_progress_bar.configure(mode="determinate")
+        self.update_dialog_progress_value.set(0.0)
+        self.update_dialog_status_value.set(message)
+        self.update_install_button.configure(state="normal")
+        self.update_cancel_button.configure(state="normal")
+        messagebox.showerror(
+            "No se pudo actualizar",
+            f"{message}\n\nPuedes usar Ver en GitHub como alternativa.",
+            parent=self.update_dialog or self.root,
+        )
+
+    def _show_last_update_result(self) -> None:
+        """Muestra el resultado escrito por el helper después del reinicio."""
+        result = consume_update_result()
+        if not result:
+            return
+        message = str(result.get("message", "Resultado de actualización desconocido."))
+        if result.get("success") is True:
+            messagebox.showinfo("Actualización completada", message, parent=self.root)
+        else:
+            messagebox.showerror("Actualización no completada", message, parent=self.root)
 
     def _show_update_error(self, result: UpdateResult) -> None:
         """Traduce errores de la API a mensajes breves para búsqueda manual."""
@@ -1477,7 +1920,11 @@ class KenjiMusicDownloaderGUI:
                     output_format=audio_format.key,
                     audio_quality=audio_quality.key,
                     theme=self.theme_value.get(),
-                    check_updates_on_startup=self.check_updates_on_startup_value.get(),
+                    auto_check_updates=self.auto_check_updates_value.get(),
+                    auto_download_updates=self.auto_download_updates_value.get(),
+                    allow_auto_install_updates=(
+                        self.allow_auto_install_updates_value.get()
+                    ),
                 )
             )
         except (ValueError, SettingsError) as error:
@@ -1731,6 +2178,22 @@ class KenjiMusicDownloaderGUI:
                     value, UpdateResult
                 ):
                     self._finish_update_check(value)
+                elif event_name == "update_package_ready" and isinstance(
+                    value, UpdatePackage
+                ):
+                    self._finish_update_package_ready(value)
+                elif event_name == "update_download_progress" and isinstance(
+                    value, UpdateDownloadProgress
+                ):
+                    self._show_update_download_progress(value)
+                elif event_name == "update_download_complete" and isinstance(
+                    value, DownloadedUpdate
+                ):
+                    self._finish_update_download(value)
+                elif event_name == "update_operation_cancelled":
+                    self._finish_update_cancelled()
+                elif event_name == "update_operation_error":
+                    self._finish_update_operation_error(str(value))
         except queue.Empty:
             pass
 
@@ -1905,6 +2368,16 @@ class KenjiMusicDownloaderGUI:
 
     def _on_close(self) -> None:
         """Pide confirmación si el usuario intenta cerrar durante una descarga."""
+        if self.update_installing:
+            self.root.destroy()
+            return
+        if self.update_operation_running:
+            messagebox.showwarning(
+                "Actualización en curso",
+                "Cancela la actualización y espera a que termine antes de cerrar.",
+                parent=self.root,
+            )
+            return
         if self.tool_install_running:
             messagebox.showwarning(
                 "Instalación en curso",

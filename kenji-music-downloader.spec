@@ -43,3 +43,36 @@ executable = EXE(
     console=False,
     disable_windowed_traceback=False,
 )
+
+# Helper pequeño e independiente: puede seguir ejecutándose después de que la
+# ventana principal cierre y así reemplazar archivos bloqueados en Windows.
+installer_analysis = Analysis(
+    ["src/update_installer.py"],
+    pathex=["."],
+    binaries=[],
+    datas=[],
+    hiddenimports=[],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+
+installer_archive = PYZ(installer_analysis.pure)
+
+installer_executable = EXE(
+    installer_archive,
+    installer_analysis.scripts,
+    installer_analysis.binaries,
+    installer_analysis.datas,
+    [],
+    name="KenjiUpdateInstaller",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+)

@@ -55,24 +55,52 @@ try {
     }
 
     $ExecutablePath = Join-Path $DistDirectory "KenjiMusicDownloader.exe"
+    $UpdaterPath = Join-Path $DistDirectory "KenjiUpdateInstaller.exe"
     if (-not (Test-Path -LiteralPath $ExecutablePath)) {
         throw "No se generó el ejecutable esperado: $ExecutablePath"
+    }
+    if (-not (Test-Path -LiteralPath $UpdaterPath)) {
+        throw "No se generó el helper esperado: $UpdaterPath"
     }
 
     $Version = (& $PythonExecutable -c "from src.config import APP_VERSION; print(APP_VERSION)").Trim()
     $ZipPath = Join-Path $DistDirectory "KenjiMusicDownloader-v$Version-Windows-x64.zip"
     $ArchiveParameters = @{
-        LiteralPath = @($ExecutablePath, (Join-Path $ProjectRoot "README.md"))
+        LiteralPath = @(
+            $ExecutablePath,
+            $UpdaterPath,
+            (Join-Path $ProjectRoot "README.md")
+        )
         DestinationPath = $ZipPath
         CompressionLevel = "Optimal"
         Force = $true
     }
     Compress-Archive @ArchiveParameters
 
+    $ZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ZipPath).Hash.ToLowerInvariant()
+    $ManifestPath = Join-Path $DistDirectory "update.json"
+    $Manifest = @{
+        version = $Version
+        assets = @{
+            "windows-x64" = @{
+                name = [System.IO.Path]::GetFileName($ZipPath)
+                sha256 = $ZipHash
+            }
+        }
+        notes = "Actualización de Kenji Music Downloader v$Version"
+    } | ConvertTo-Json -Depth 5
+    [System.IO.File]::WriteAllText(
+        $ManifestPath,
+        $Manifest,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
     Write-Host ""
     Write-Host "Empaquetado completado correctamente."
     Write-Host "Ejecutable: $ExecutablePath"
+    Write-Host "Helper: $UpdaterPath"
     Write-Host "Paquete para GitHub Releases: $ZipPath"
+    Write-Host "Manifest: $ManifestPath"
 }
 finally {
     Pop-Location

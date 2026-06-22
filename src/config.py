@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 
 APP_NAME = "Kenji Music Downloader"
-APP_VERSION = "1.0.3"
+APP_VERSION = "1.0.5"
 APP_DESCRIPTION = "Descarga y convierte audio de YouTube de forma sencilla y segura."
 
 # Opciones internas de red. No provienen de la entrada del usuario.
