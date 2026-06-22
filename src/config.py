@@ -1,12 +1,12 @@
 """Configuración y rutas compartidas por la aplicación."""
 
 from pathlib import Path
-import shutil
 import sys
+from tempfile import NamedTemporaryFile
 
 
 APP_NAME = "Kenji Music Downloader"
-APP_VERSION = "1.0.2"
+APP_VERSION = "1.0.3"
 APP_DESCRIPTION = "Descarga y convierte audio de YouTube de forma sencilla y segura."
 
 # Opciones internas de red. No provienen de la entrada del usuario.
@@ -32,8 +32,8 @@ class ConfigurationError(RuntimeError):
     """Error entendible relacionado con la configuración local."""
 
 
-def prepare_environment(output_directory: Path | None = None) -> Path:
-    """Prepara una carpeta de salida elegida por la aplicación y comprueba FFmpeg."""
+def prepare_output_directory(output_directory: Path | None = None) -> Path:
+    """Crea y verifica una carpeta de salida sin dejar archivos de prueba."""
     target_directory = (output_directory or DOWNLOADS_DIRECTORY).expanduser()
 
     try:
@@ -50,10 +50,34 @@ def prepare_environment(output_directory: Path | None = None) -> Path:
             f"La ruta de salida no es una carpeta: {target_directory}"
         )
 
-    if shutil.which("ffmpeg") is None:
+    try:
+        with NamedTemporaryFile(
+            prefix=".kenji-write-test-",
+            suffix=".tmp",
+            dir=target_directory,
+        ):
+            pass
+    except OSError as error:
         raise ConfigurationError(
-            "No se encontró FFmpeg. Instálalo y comprueba que el comando "
-            "'ffmpeg' esté disponible en la terminal."
+            f"La carpeta de salida no permite escritura: {target_directory}"
+        ) from error
+
+    return target_directory
+
+
+def prepare_environment(output_directory: Path | None = None) -> Path:
+    """Prepara la salida y comprueba herramientas locales o disponibles en PATH."""
+    target_directory = prepare_output_directory(output_directory)
+
+    # Importación local para evitar ciclos entre configuración y rutas de usuario.
+    from src.tool_manager import missing_ffmpeg_tools
+
+    missing = missing_ffmpeg_tools()
+    if missing:
+        tool_names = " y ".join(name for name in missing)
+        raise ConfigurationError(
+            f"No se encontró {tool_names}. Usa "
+            "Herramientas > Instalar herramientas necesarias."
         )
 
     return target_directory

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from src.error_log import get_error_log_path, log_error, read_error_log
+from src.error_log import get_error_log_path, log_error, log_info, read_error_log
 
 
 class ErrorLogTests(unittest.TestCase):
@@ -38,6 +38,16 @@ class ErrorLogTests(unittest.TestCase):
             self.assertIn("[FFmpeg]", content)
             self.assertIn("Falló la conversión", content)
             self.assertIn("RuntimeError: detalle técnico", content)
+
+    def test_info_events_are_recorded_without_exception(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            log_path = Path(temporary_directory) / "errors.log"
+
+            log_info("Instalación", "FFmpeg instalado.", log_path)
+            content = read_error_log(log_path)
+
+            self.assertIn("[INFO] [Instalación]", content)
+            self.assertIn("FFmpeg instalado.", content)
 
 
 if __name__ == "__main__":

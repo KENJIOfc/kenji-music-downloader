@@ -17,6 +17,7 @@ downloads/*
 *.wav
 *.flac
 *.ogg
+/tools/
 
 # Registros, temporales y credenciales locales
 *.log

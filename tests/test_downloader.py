@@ -16,6 +16,7 @@ from src.downloader import (
     TimingMetric,
     _friendly_error_message,
 )
+from src.tool_manager import LOCAL_SOURCE, ResolvedTool
 
 
 class DownloaderProgressTests(unittest.TestCase):
@@ -337,6 +338,40 @@ class DownloadFlowTests(unittest.TestCase):
             self.assertEqual(
                 options["postprocessors"][0]["preferredquality"],
                 "320",
+            )
+
+    @patch("src.downloader.CancellableYoutubeDL", FakeYoutubeDL)
+    def test_passes_local_ffmpeg_directory_to_yt_dlp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            tools_directory = Path(temporary_directory) / "tools"
+            tools_directory.mkdir()
+            resolved = {
+                "ffmpeg": ResolvedTool(
+                    "ffmpeg",
+                    tools_directory / "ffmpeg.exe",
+                    LOCAL_SOURCE,
+                ),
+                "ffprobe": ResolvedTool(
+                    "ffprobe",
+                    tools_directory / "ffprobe.exe",
+                    LOCAL_SOURCE,
+                ),
+            }
+            downloader = AudioDownloader(Path(temporary_directory))
+
+            with patch(
+                "src.downloader.resolve_tool",
+                side_effect=lambda name: resolved[name],
+            ):
+                downloader.download_mp3(
+                    "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                )
+
+            options = FakeYoutubeDL.last_options
+            assert options is not None
+            self.assertEqual(
+                options["ffmpeg_location"],
+                str(tools_directory),
             )
 
     def test_rejects_unknown_output_format(self) -> None:

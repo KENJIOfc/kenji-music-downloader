@@ -5,7 +5,7 @@ YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
 interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
 FFmpeg.
 
-Versión actual: **v1.0.2**.
+Versión actual: **v1.0.3**.
 
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
@@ -29,29 +29,60 @@ Versión actual: **v1.0.2**.
 - Conserva un historial local de las últimas 20 descargas.
 - Permite abrir el último archivo descargado con el reproductor predeterminado.
 - Verifica `yt-dlp`, FFmpeg, FFprobe, carpeta de salida y conexión.
+- Puede instalar FFmpeg y FFprobe localmente, siempre con confirmación previa.
 - Incluye temas claro y oscuro y un registro local de errores.
 - Busca nuevas versiones mediante la API pública de GitHub Releases.
 - Ofrece menú de Archivo, Herramientas y Ayuda.
-- No incluye playlists ni instaladores de terceros.
+- No incluye playlists, no ejecuta instaladores externos y no modifica el `PATH`.
 
 ## Requisitos
 
 - Python 3.10 o posterior.
 - Tkinter (incluido normalmente con Python en Windows).
-- FFmpeg y FFprobe disponibles en el `PATH` del sistema.
 - `yt-dlp-ejs` y Deno, instalados automáticamente mediante `requirements.txt`.
 - Conexión a Internet durante las descargas.
 
 El ejecutable de Windows incluye Python, `yt-dlp` y Deno; el usuario no
-necesita instalar Python. FFmpeg y FFprobe continúan siendo herramientas del
-sistema y deben instalarse por separado.
+necesita instalar Python. Si FFmpeg o FFprobe faltan, la propia aplicación
+puede descargarlos e instalarlos para ese usuario.
+
+## Herramientas necesarias
+
+FFmpeg y FFprobe realizan la conversión de audio. La aplicación los busca en
+este orden:
+
+1. `%APPDATA%\KenjiMusicDownloader\tools\`;
+2. una carpeta `tools` junto al ejecutable, o junto al propio ejecutable;
+3. el `PATH` del sistema.
+
+Si no los encuentra, usa **Herramientas > Instalar herramientas necesarias** o
+acepta la propuesta que aparece al verificar herramientas o iniciar una
+descarga. La aplicación pide confirmación, descarga el ZIP essentials para
+Windows x64, extrae únicamente `ffmpeg.exe` y `ffprobe.exe`, y elimina el ZIP
+temporal al terminar. No modifica el `PATH`, no instala nada globalmente y no
+solicita permisos de administrador.
+
+La fuente configurada es
+[Gyan.dev](https://www.gyan.dev/ffmpeg/builds/), proveedor de compilaciones de
+Windows enlazado desde la
+[página oficial de descarga de FFmpeg](https://ffmpeg.org/download.html#build-windows).
+La constante `FFMPEG_WINDOWS_X64_URL` de `src/tool_manager.py` usa esta URL
+estable:
+
+```text
+https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
+```
+
+La instalación automática está disponible para Windows x64. En Linux se usa el
+paquete FFmpeg de la distribución. Quien lo prefiera también puede instalar
+FFmpeg manualmente y dejar `ffmpeg` y `ffprobe` disponibles en el `PATH`.
 
 ## Descargar desde GitHub Releases
 
 Las versiones publicadas se distribuyen desde
 [GitHub Releases](https://github.com/KENJIOFC/kenji-music-downloader/releases).
 Para Windows, descarga el archivo con nombre similar a
-`KenjiMusicDownloader-v1.0.2-Windows-x64.zip`, extráelo y ejecuta
+`KenjiMusicDownloader-v1.0.3-Windows-x64.zip`, extráelo y ejecuta
 `KenjiMusicDownloader.exe`.
 
 Esta primera distribución no está firmada digitalmente. Windows SmartScreen o
@@ -121,10 +152,10 @@ Para que la detección funcione debe existir al menos una release publicada en
 GitHub. Si todavía no hay releases, la búsqueda manual muestra una explicación
 clara. Para probar el flujo:
 
-1. publica una release con tag `v1.0.2` y comprueba que la app indique que está
+1. publica una release con tag `v1.0.3` y comprueba que la app indique que está
    actualizada;
 2. publica después una release de prueba con una versión superior, como
-   `v1.0.3`;
+   `v1.0.4`;
 3. vuelve a buscar y la app ofrecerá abrir la página de Releases.
 
 ## Historial, herramientas y registro
@@ -148,7 +179,7 @@ el archivo fue movido o eliminado, la aplicación muestra un error claro.
 **Herramientas > Verificar herramientas** comprueba en segundo plano:
 
 - módulo Python de `yt-dlp`;
-- comandos `ffmpeg` y `ffprobe` en el `PATH`;
+- `ffmpeg` y `ffprobe` locales, junto al ejecutable o en el `PATH`;
 - existencia y permiso de escritura de la carpeta de salida;
 - conexión HTTPS básica con YouTube.
 
@@ -188,18 +219,17 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Instala FFmpeg. Una opción mediante Windows Package Manager es:
+FFmpeg puede instalarse desde el menú de la aplicación. Como alternativa
+manual, Windows Package Manager ofrece:
 
 ```powershell
 winget install --id Gyan.FFmpeg --exact
 ```
 
-Cierra y vuelve a abrir PowerShell si el comando todavía no aparece. Comprueba
-la instalación, ejecuta las pruebas y abre la interfaz gráfica:
+Cierra y vuelve a abrir PowerShell si usaste la alternativa manual y el comando
+todavía no aparece. Ejecuta las pruebas y abre la interfaz gráfica:
 
 ```powershell
-ffmpeg -version
-ffprobe -version
 python -m unittest discover -s tests -v
 python -m src.gui
 ```
@@ -228,7 +258,7 @@ Resultados:
 
 ```text
 dist\KenjiMusicDownloader.exe
-dist\KenjiMusicDownloader-v1.0.2-Windows-x64.zip
+dist\KenjiMusicDownloader-v1.0.3-Windows-x64.zip
 ```
 
 El comando manual equivalente es:
@@ -239,8 +269,8 @@ El comando manual equivalente es:
 
 El ejecutable es de un solo archivo, no abre consola negra y no depende de la
 carpeta de desarrollo de Codex. Las preferencias, el historial y los logs
-continúan guardándose bajo `%APPDATA%`. FFmpeg y FFprobe deben estar en el
-`PATH` del sistema, incluso al ejecutar el `.exe` desde otra carpeta.
+continúan guardándose bajo `%APPDATA%`. El empaquetado no requiere que FFmpeg
+esté instalado globalmente: si falta, puede instalarse desde la propia app.
 
 ## Pasar el proyecto a Linux
 
@@ -372,6 +402,9 @@ git ls-files "*.mp3" "*.m4a" "*.opus" "*.wav" "*.flac" "*.ogg" "*.log"
 `%APPDATA%\KenjiMusicDownloader\`, no dentro del repositorio ni del ZIP de la
 release.
 
+Las herramientas descargadas se guardan en
+`%APPDATA%\KenjiMusicDownloader\tools\` y tampoco forman parte del repositorio.
+
 ## Estructura
 
 ```text
@@ -386,6 +419,7 @@ kenji-music-downloader/
 │   ├── platform_utils.py
 │   ├── download_history.py
 │   ├── diagnostics.py
+│   ├── tool_manager.py
 │   ├── error_log.py
 │   ├── updates.py
 │   ├── security.py
@@ -396,6 +430,8 @@ kenji-music-downloader/
 │   ├── test_downloader.py
 │   ├── test_download_history.py
 │   ├── test_diagnostics.py
+│   ├── test_config.py
+│   ├── test_tool_manager.py
 │   ├── test_error_log.py
 │   ├── test_platform_utils.py
 │   ├── test_user_settings.py
@@ -421,10 +457,11 @@ kenji-music-downloader/
 - `src/platform_utils.py`: apertura segura de carpetas en Windows, Linux y macOS.
 - `src/download_history.py`: historial JSON persistente y limitado.
 - `src/diagnostics.py`: verificación de herramientas, carpeta y conexión.
+- `src/tool_manager.py`: resolución, descarga y extracción segura de FFmpeg/FFprobe.
 - `src/error_log.py`: registro local de errores importantes.
 - `src/updates.py`: consulta GitHub Releases, compara versiones y conserva
   metadatos de assets para una futura actualización automática.
-- `src/config.py`: versión, rutas portables y comprobación de FFmpeg.
+- `src/config.py`: versión, rutas portables y validación de la carpeta de salida.
 - `tests/test_security.py`: verifica que se acepten y rechacen los enlaces correctos.
 - `tests/test_downloader.py`: verifica el progreso consumido por la interfaz.
 - `kenji-music-downloader.spec`: configuración portable de PyInstaller.

@@ -49,6 +49,26 @@ def log_error(
         return
 
 
+def log_info(
+    category: str,
+    message: str,
+    log_path: Path | None = None,
+) -> None:
+    """Registra operaciones relevantes sin marcarlas como excepciones."""
+    path = log_path or get_error_log_path()
+    timestamp = datetime.now().astimezone().isoformat(timespec="seconds")
+    lines = [
+        f"[{timestamp}] [INFO] [{category}] {message.strip()}",
+        "-" * 72,
+    ]
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as log_file:
+            log_file.write("\n".join(lines) + "\n")
+    except OSError:
+        return
+
+
 def read_error_log(log_path: Path | None = None) -> str:
     """Lee el registro o devuelve texto vacío cuando aún no existe."""
     path = log_path or get_error_log_path()

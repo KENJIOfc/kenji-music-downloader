@@ -27,6 +27,7 @@ from src.audio_formats import (
     get_audio_quality,
 )
 from src.config import FORCE_IPV4, SOCKET_TIMEOUT_SECONDS
+from src.tool_manager import PATH_SOURCE, resolve_tool
 
 
 StatusCallback = Callable[[str], None]
@@ -389,6 +390,16 @@ class AudioDownloader:
             "postprocessor_hooks": [self._postprocessor_hook],
             "postprocessors": [postprocessor],
         }
+
+        ffmpeg = resolve_tool("ffmpeg")
+        ffprobe = resolve_tool("ffprobe")
+        if ffmpeg and ffprobe and (
+            ffmpeg.source != PATH_SOURCE or ffprobe.source != PATH_SOURCE
+        ):
+            # yt-dlp acepta una carpeta y localiza ahí ambos ejecutables.
+            # La instalación local siempre coloca FFmpeg y FFprobe juntos.
+            if ffmpeg.path.parent == ffprobe.path.parent:
+                ydl_options["ffmpeg_location"] = str(ffmpeg.path.parent)
 
         if self.force_ipv4:
             # La API Python representa --force-ipv4 con esta dirección de enlace.

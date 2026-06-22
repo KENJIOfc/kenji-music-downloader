@@ -35,6 +35,7 @@ from src.config import (
     DOWNLOADS_DIRECTORY,
     ConfigurationError,
     prepare_environment,
+    prepare_output_directory,
 )
 from src.platform_utils import (
     OpenDirectoryError,
@@ -50,6 +51,11 @@ from src.downloader import (
     TimingMetric,
 )
 from src.security import InvalidYouTubeURLError, validate_and_normalize_youtube_url
+from src.tool_manager import (
+    ToolInstallationError,
+    install_ffmpeg_tools,
+    missing_ffmpeg_tools,
+)
 from src.updates import GITHUB_RELEASES_URL, UpdateResult, check_for_updates
 from src.user_settings import (
     DEFAULT_THEME,
@@ -180,6 +186,7 @@ class KenjiMusicDownloaderGUI:
         self.active_audio_quality: AudioQuality | None = None
         self.active_download_name = "Descarga sin título"
         self.tools_check_running = False
+        self.tool_install_running = False
         self.update_check_running = False
         self.update_check_manual = False
         self.style = ttk.Style(self.root)
@@ -191,7 +198,16 @@ class KenjiMusicDownloaderGUI:
         saved_quality = get_audio_quality(saved_settings.audio_quality)
 
         self.url_value = tk.StringVar()
-        self.output_value = tk.StringVar(value=saved_settings.output_directory)
+        saved_output_directory = saved_settings.output_directory
+        try:
+            saved_output_directory = str(
+                prepare_output_directory(Path(saved_output_directory))
+            )
+        except ConfigurationError as error:
+            # La ventana sigue abriendo y permite elegir otra carpeta.
+            log_error("Carpeta de salida", str(error), error)
+
+        self.output_value = tk.StringVar(value=saved_output_directory)
         self.format_value = tk.StringVar(value=saved_format.selector_label)
         self.quality_value = tk.StringVar(value=saved_quality.selector_label)
         self.theme_value = tk.StringVar(value=saved_settings.theme)
@@ -594,6 +610,10 @@ class KenjiMusicDownloaderGUI:
         tools_menu.add_command(
             label="Verificar herramientas",
             command=self._start_tools_check,
+        )
+        tools_menu.add_command(
+            label="Instalar herramientas necesarias",
+            command=self._start_tool_install,
         )
         tools_menu.add_separator()
 
@@ -1029,7 +1049,7 @@ class KenjiMusicDownloaderGUI:
 
     def _start_tools_check(self) -> None:
         """Ejecuta la verificación en segundo plano para no congelar la ventana."""
-        if self.tools_check_running:
+        if self.tools_check_running or self.tool_install_running:
             return
         self.tools_check_running = True
         self.status_value.set("Verificando herramientas y conexión...")
@@ -1065,8 +1085,118 @@ class KenjiMusicDownloaderGUI:
                 )
         if all(result.available for result in results):
             messagebox.showinfo("Verificar herramientas", message, parent=self.root)
+            return
+
+        missing_labels = {
+            result.label for result in results if not result.available
+        }
+        missing_conversion_tools = missing_labels.intersection({"ffmpeg", "ffprobe"})
+        if missing_conversion_tools:
+            prompt = (
+                f"{message}\n\n"
+                "FFmpeg y FFprobe son necesarios para convertir audio a MP3, "
+                "M4A, FLAC, OGG, WAV u OPUS.\n\n"
+                "¿Quieres descargarlos e instalarlos automáticamente solo para "
+                "esta aplicación?"
+            )
+            if messagebox.askyesno(
+                "Herramientas necesarias",
+                prompt,
+                parent=self.root,
+            ):
+                self._start_tool_install(confirmed=True)
+            return
+
+        messagebox.showwarning("Verificar herramientas", message, parent=self.root)
+
+    def _start_tool_install(self, confirmed: bool = False) -> None:
+        """Solicita confirmación y arranca la instalación fuera del hilo gráfico."""
+        if self.is_downloading:
+            messagebox.showwarning(
+                "Descarga en curso",
+                "Espera a que termine o cancela la descarga antes de instalar herramientas.",
+                parent=self.root,
+            )
+            return
+        if self.tool_install_running:
+            self.status_value.set("La instalación de herramientas ya está en curso...")
+            return
+
+        missing = missing_ffmpeg_tools()
+        if not missing:
+            messagebox.showinfo(
+                "Herramientas necesarias",
+                "Todas las herramientas necesarias ya están disponibles.",
+                parent=self.root,
+            )
+            return
+
+        if not confirmed:
+            names = " y ".join(name.upper() for name in missing)
+            confirmed = messagebox.askyesno(
+                "Instalar herramientas necesarias",
+                f"No se encontró {names}.\n\n"
+                "¿Quieres descargar FFmpeg y FFprobe e instalarlos en la "
+                "carpeta local de la aplicación?",
+                parent=self.root,
+            )
+        if not confirmed:
+            return
+
+        self.tool_install_running = True
+        self.download_button.configure(state="disabled")
+        self.status_value.set("Descargando FFmpeg…")
+        worker = threading.Thread(target=self._tool_install_worker, daemon=True)
+        worker.start()
+
+    def _tool_install_worker(self) -> None:
+        """Descarga y extrae herramientas sin tocar widgets de Tkinter."""
+        try:
+            installed = install_ffmpeg_tools(
+                status_callback=lambda text: self.events.put(
+                    ("tool_install_status", text)
+                )
+            )
+        except ToolInstallationError as error:
+            self.events.put(("tool_install_error", str(error)))
+        except Exception as error:
+            log_error(
+                "Instalación de herramientas",
+                "Ocurrió un error inesperado durante la instalación.",
+                error,
+            )
+            self.events.put(
+                (
+                    "tool_install_error",
+                    "No se pudieron instalar las herramientas. Revisa el registro de errores.",
+                )
+            )
         else:
-            messagebox.showwarning("Verificar herramientas", message, parent=self.root)
+            self.events.put(("tool_install_success", installed))
+
+    def _finish_tool_install(self, installed: dict[str, Path]) -> None:
+        """Confirma la instalación y vuelve a comprobar las herramientas."""
+        self.tool_install_running = False
+        self.download_button.configure(state="normal")
+        self.status_value.set("Instalación completada.")
+        paths = "\n".join(f"{name}: {path}" for name, path in installed.items())
+        messagebox.showinfo(
+            "Herramientas instaladas",
+            f"Herramientas instaladas correctamente.\n\n{paths}",
+            parent=self.root,
+        )
+        self._start_tools_check()
+
+    def _finish_tool_install_error(self, message: str) -> None:
+        """Restaura la interfaz después de un fallo controlado."""
+        self.tool_install_running = False
+        self.download_button.configure(state="normal")
+        self.status_value.set("No se pudieron instalar las herramientas.")
+        messagebox.showerror(
+            "Instalación de herramientas",
+            message,
+            parent=self.root,
+        )
 
     def _show_error_log(self) -> None:
         """Muestra el registro dentro de la aplicación sin depender de un editor."""
@@ -1161,9 +1291,21 @@ class KenjiMusicDownloaderGUI:
             return
 
         try:
-            directory = Path(output_text).expanduser().resolve()
-            directory.mkdir(parents=True, exist_ok=True)
-            open_directory(directory)
+            output_directory = prepare_output_directory(Path(output_text))
+        except ConfigurationError as error:
+            log_error("Carpeta de salida", str(error), error)
+            if messagebox.askyesno(
+                "Carpeta no válida",
+                f"{error}\n\n¿Quieres seleccionar otra carpeta?",
+                parent=self.root,
+            ):
+                self._select_output_directory()
+            return
+
+        self.output_value.set(str(output_directory))
+
+        try:
+            open_directory(output_directory)
         except (OSError, OpenDirectoryError) as error:
             log_error("Abrir carpeta", str(error), error)
             messagebox.showerror(
@@ -1392,6 +1534,32 @@ class KenjiMusicDownloaderGUI:
             return
 
         try:
+            output_directory = prepare_output_directory(Path(output_text))
+        except ConfigurationError as error:
+            log_error("Carpeta de salida", str(error), error)
+            if messagebox.askyesno(
+                "Carpeta no válida",
+                f"{error}\n\n¿Quieres seleccionar otra carpeta?",
+                parent=self.root,
+            ):
+                self._select_output_directory()
+            return
+
+        self.output_value.set(str(output_directory))
+
+        missing_tools = missing_ffmpeg_tools()
+        if missing_tools:
+            names = " y ".join(name.upper() for name in missing_tools)
+            if messagebox.askyesno(
+                "Herramientas necesarias",
+                f"No se encontró {names}. No se puede convertir el audio sin estas "
+                "herramientas.\n\n¿Quieres instalarlas ahora?",
+                parent=self.root,
+            ):
+                self._start_tool_install(confirmed=True)
+            return
+
+        try:
             audio_format = get_audio_format_from_label(self.format_value.get())
             audio_quality = get_audio_quality_from_label(self.quality_value.get())
         except ValueError as error:
@@ -1422,7 +1590,7 @@ class KenjiMusicDownloaderGUI:
         self.root.update_idletasks()
         self._launch_download_worker(
             safe_url,
-            Path(output_text),
+            output_directory,
             audio_format.key,
             audio_quality.key,
             operation_started_at,
@@ -1553,6 +1721,12 @@ class KenjiMusicDownloaderGUI:
                         "No se pudo completar la verificación. Revisa el registro de errores.",
                         parent=self.root,
                     )
+                elif event_name == "tool_install_status":
+                    self.status_value.set(str(value))
+                elif event_name == "tool_install_success" and isinstance(value, dict):
+                    self._finish_tool_install(value)
+                elif event_name == "tool_install_error":
+                    self._finish_tool_install_error(str(value))
                 elif event_name == "update_check_result" and isinstance(
                     value, UpdateResult
                 ):
@@ -1731,6 +1905,13 @@ class KenjiMusicDownloaderGUI:
 
     def _on_close(self) -> None:
         """Pide confirmación si el usuario intenta cerrar durante una descarga."""
+        if self.tool_install_running:
+            messagebox.showwarning(
+                "Instalación en curso",
+                "Espera a que termine la instalación de herramientas antes de cerrar.",
+                parent=self.root,
+            )
+            return
         if self.is_downloading and not messagebox.askyesno(
             "Descarga en curso",
             "Hay una descarga en curso. ¿Quieres cerrar la aplicación?",

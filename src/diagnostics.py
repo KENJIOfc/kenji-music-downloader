@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import importlib.util
-import os
 from pathlib import Path
-import shutil
 from urllib.error import URLError
 from urllib.request import Request, urlopen
+
+from src.config import ConfigurationError, prepare_output_directory
+from src.tool_manager import resolve_tool
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +46,18 @@ def check_internet_connection(timeout: float = 5.0) -> bool:
 def verify_tools(output_directory: Path) -> list[ToolCheckResult]:
     """Revisa dependencias sin ejecutar comandos aportados por el usuario."""
     yt_dlp_found = importlib.util.find_spec("yt_dlp") is not None
-    ffmpeg_path = shutil.which("ffmpeg")
-    ffprobe_path = shutil.which("ffprobe")
+    ffmpeg = resolve_tool("ffmpeg")
+    ffprobe = resolve_tool("ffprobe")
 
-    resolved_output = output_directory.expanduser().resolve()
-    output_valid = resolved_output.is_dir() and os.access(resolved_output, os.W_OK)
+    try:
+        resolved_output = prepare_output_directory(output_directory)
+    except ConfigurationError as error:
+        resolved_output = output_directory.expanduser().resolve()
+        output_valid = False
+        output_detail = str(error)
+    else:
+        output_valid = True
+        output_detail = str(resolved_output)
     connection_available = check_internet_connection()
 
     return [
@@ -60,18 +68,22 @@ def verify_tools(output_directory: Path) -> list[ToolCheckResult]:
         ),
         ToolCheckResult(
             "ffmpeg",
-            ffmpeg_path is not None,
-            ffmpeg_path or "instala FFmpeg y agrégalo al PATH",
+            ffmpeg is not None,
+            f"{ffmpeg.source}: {ffmpeg.path}"
+            if ffmpeg
+            else "puede instalarse desde el menú Herramientas",
         ),
         ToolCheckResult(
             "ffprobe",
-            ffprobe_path is not None,
-            ffprobe_path or "normalmente se instala junto con FFmpeg",
+            ffprobe is not None,
+            f"{ffprobe.source}: {ffprobe.path}"
+            if ffprobe
+            else "puede instalarse junto con FFmpeg",
         ),
         ToolCheckResult(
             "Carpeta de salida",
             output_valid,
-            str(resolved_output) if output_valid else "no existe o no permite escritura",
+            output_detail,
         ),
         ToolCheckResult(
             "Conexión",

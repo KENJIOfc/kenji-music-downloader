@@ -37,12 +37,6 @@ if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     throw "No se encontró el entorno virtual: $PythonExecutable"
 }
 
-foreach ($ToolName in @("ffmpeg", "ffprobe")) {
-    if (-not (Get-Command $ToolName -ErrorAction SilentlyContinue)) {
-        throw "No se encontró $ToolName en PATH. Instala FFmpeg antes de empaquetar."
-    }
-}
-
 Push-Location $ProjectRoot
 try {
     if (-not $SkipTests) {
