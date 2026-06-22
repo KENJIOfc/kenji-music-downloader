@@ -3,6 +3,7 @@
 
 from PyInstaller.utils.hooks import collect_all
 from pathlib import Path
+import shutil
 import sys
 
 
@@ -10,8 +11,13 @@ yt_dlp_datas, yt_dlp_binaries, yt_dlp_hidden_imports = collect_all("yt_dlp")
 ejs_datas, ejs_binaries, ejs_hidden_imports = collect_all("yt_dlp_ejs")
 
 deno_name = "deno.exe" if sys.platform == "win32" else "deno"
-deno_path = Path(sys.executable).resolve().parent / deno_name
-deno_binaries = [(str(deno_path), ".")] if deno_path.is_file() else []
+deno_candidates = (
+    Path(sys.executable).resolve().parent / deno_name,
+    Path(".venv") / ("Scripts" if sys.platform == "win32" else "bin") / deno_name,
+    Path(shutil.which("deno") or ""),
+)
+deno_path = next((path.resolve() for path in deno_candidates if path.is_file()), None)
+deno_binaries = [(str(deno_path), ".")] if deno_path else []
 
 analysis = Analysis(
     ["src/gui.py"],

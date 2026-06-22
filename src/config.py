@@ -6,8 +6,9 @@ from tempfile import NamedTemporaryFile
 
 
 APP_NAME = "Kenji Music Downloader"
-APP_VERSION = "1.0.5"
+APP_VERSION = "1.0.6"
 APP_DESCRIPTION = "Descarga y convierte audio de YouTube de forma sencilla y segura."
+SUPPORT_DISCORD_URL = "https://discordapp.com/users/649369933226180658"
 
 # Opciones internas de red. No provienen de la entrada del usuario.
 FORCE_IPV4 = True

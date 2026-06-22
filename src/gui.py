@@ -34,6 +34,7 @@ from src.config import (
     APP_NAME,
     APP_VERSION,
     DOWNLOADS_DIRECTORY,
+    SUPPORT_DISCORD_URL,
     ConfigurationError,
     prepare_environment,
     prepare_output_directory,
@@ -238,6 +239,8 @@ class KenjiMusicDownloaderGUI:
         self.pending_update_package: UpdatePackage | None = None
         self.downloaded_update: DownloadedUpdate | None = None
         self.update_dialog: tk.Toplevel | None = None
+        self.update_notes_widget: tk.Text | None = None
+        self.support_dialog: tk.Toplevel | None = None
         self.update_installing = False
         self.style = ttk.Style(self.root)
         self.managed_menus: list[tk.Menu] = []
@@ -770,6 +773,10 @@ class KenjiMusicDownloaderGUI:
             command=self._show_error_log,
         )
         help_menu.add_separator()
+        help_menu.add_command(
+            label="Contacto / Soporte",
+            command=self._show_support_dialog,
+        )
         help_menu.add_command(label="Acerca de", command=self._show_about)
         menu_bar.add_cascade(label="Ayuda", menu=help_menu)
 
@@ -813,6 +820,11 @@ class KenjiMusicDownloaderGUI:
             "TLabel",
             background=palette["background"],
             foreground=palette["foreground"],
+        )
+        self.style.configure(
+            "SupportLink.TLabel",
+            background=palette["background"],
+            foreground=palette["accent"],
         )
         self.style.configure(
             "TLabelframe",
@@ -894,6 +906,9 @@ class KenjiMusicDownloaderGUI:
         self.history_tree.tag_configure("completed", foreground=success_color)
         self.history_tree.tag_configure("cancelled", foreground=palette["muted"])
         self.history_tree.tag_configure("error", foreground=error_color)
+
+        if self.support_dialog and self.support_dialog.winfo_exists():
+            self.support_dialog.configure(background=palette["background"])
 
         if save_preference:
             self._save_preferences(show_error=True)
@@ -1445,6 +1460,105 @@ class KenjiMusicDownloaderGUI:
             parent=self.root,
         )
 
+    def _show_support_dialog(self) -> None:
+        """Muestra el contacto oficial sin depender de servicios adicionales."""
+        if self.support_dialog and self.support_dialog.winfo_exists():
+            self.support_dialog.lift()
+            self.support_dialog.focus_force()
+            return
+
+        dialog = tk.Toplevel(self.root)
+        self.support_dialog = dialog
+        dialog.title("Contacto / Soporte")
+        dialog.geometry("560x230")
+        dialog.resizable(False, False)
+        dialog.transient(self.root)
+        dialog.protocol("WM_DELETE_WINDOW", self._close_support_dialog)
+        palette = THEME_PALETTES[self.theme_value.get()]
+        dialog.configure(background=palette["background"])
+
+        container = ttk.Frame(dialog, padding=18)
+        container.pack(fill="both", expand=True)
+        ttk.Label(
+            container,
+            text="Contacto / Soporte",
+            font=("TkDefaultFont", 14, "bold"),
+        ).pack(anchor="w")
+        ttk.Label(
+            container,
+            text=(
+                "Para soporte, dudas o reportar problemas puedes contactarme "
+                "por Discord."
+            ),
+            wraplength=510,
+        ).pack(anchor="w", pady=(10, 8))
+        ttk.Label(
+            container,
+            text=SUPPORT_DISCORD_URL,
+            style="SupportLink.TLabel",
+        ).pack(anchor="w", pady=(0, 18))
+
+        buttons = ttk.Frame(container)
+        buttons.pack(fill="x")
+        ttk.Button(
+            buttons,
+            text="Abrir Discord",
+            command=self._open_support_link,
+            width=16,
+        ).pack(side="left")
+        ttk.Button(
+            buttons,
+            text="Copiar enlace",
+            command=self._copy_support_link,
+            width=16,
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            buttons,
+            text="Cerrar",
+            command=self._close_support_dialog,
+            width=12,
+        ).pack(side="right")
+
+    def _close_support_dialog(self) -> None:
+        """Cierra únicamente la ventana informativa de soporte."""
+        if self.support_dialog and self.support_dialog.winfo_exists():
+            self.support_dialog.destroy()
+        self.support_dialog = None
+
+    def _open_support_link(self) -> None:
+        """Abre exclusivamente la URL oficial y constante de soporte."""
+        try:
+            opened = webbrowser.open(SUPPORT_DISCORD_URL, new=2)
+            if not opened:
+                raise OSError("El sistema no confirmó la apertura del navegador.")
+        except Exception as error:
+            log_error("Soporte", "No se pudo abrir el enlace de Discord.", error)
+            messagebox.showerror(
+                "No se pudo abrir Discord",
+                "No se pudo abrir el enlace en el navegador predeterminado.",
+                parent=self.support_dialog or self.root,
+            )
+
+    def _copy_support_link(self) -> None:
+        """Copia la URL como texto, sin ejecutarla ni interpretarla."""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(SUPPORT_DISCORD_URL)
+            self.root.update_idletasks()
+        except tk.TclError as error:
+            log_error("Soporte", "No se pudo copiar el enlace de Discord.", error)
+            messagebox.showerror(
+                "No se pudo copiar",
+                "No se pudo copiar el enlace al portapapeles.",
+                parent=self.support_dialog or self.root,
+            )
+            return
+        messagebox.showinfo(
+            "Enlace copiado",
+            "El enlace de Discord se copió al portapapeles.",
+            parent=self.support_dialog or self.root,
+        )
+
     def _startup_update_preference_changed(self) -> None:
         """Guarda las preferencias de actualización sin iniciar una instalación."""
         self._save_preferences(show_error=True)
@@ -1573,14 +1687,19 @@ class KenjiMusicDownloaderGUI:
             ),
         ).pack(anchor="w", pady=(10, 6))
 
+        package_text = "Paquete: no disponible"
         size_text = "Tamaño: no disponible"
         try:
             _platform_key, asset, _kind = select_release_asset(result)
+            package_text = f"Paquete: {asset.name}"
             if asset.size is not None:
                 size_text = f"Tamaño: {format_bytes(asset.size)}"
         except UpdatePackageError:
             asset = None
-        ttk.Label(container, text=size_text).pack(anchor="w", pady=(0, 8))
+        ttk.Label(
+            container,
+            text=f"{package_text}\n{size_text}",
+        ).pack(anchor="w", pady=(0, 8))
         ttk.Label(container, text="Notas de versión:").pack(anchor="w")
 
         palette = THEME_PALETTES[self.theme_value.get()]
@@ -1597,6 +1716,7 @@ class KenjiMusicDownloaderGUI:
         notes.pack(fill="both", expand=True, pady=(4, 10))
         notes.insert("1.0", (result.release_notes or "Sin notas publicadas.")[:6_000])
         notes.configure(state="disabled")
+        self.update_notes_widget = notes
 
         self.update_progress_bar = ttk.Progressbar(
             container,
@@ -1646,6 +1766,7 @@ class KenjiMusicDownloaderGUI:
         if self.update_dialog and self.update_dialog.winfo_exists():
             self.update_dialog.destroy()
         self.update_dialog = None
+        self.update_notes_widget = None
 
     def _begin_update_preparation(self, automatic: bool = False) -> None:
         """Resuelve manifest y permisos en un hilo antes de descargar."""
@@ -1691,6 +1812,14 @@ class KenjiMusicDownloaderGUI:
         self.pending_update_package = package
         self.update_progress_bar.stop()
         self.update_progress_bar.configure(mode="determinate")
+        self.update_dialog_status_value.set(
+            f"Paquete seleccionado: {package.asset.name}"
+        )
+        if package.notes and self.update_notes_widget:
+            self.update_notes_widget.configure(state="normal")
+            self.update_notes_widget.delete("1.0", tk.END)
+            self.update_notes_widget.insert("1.0", package.notes[:6_000])
+            self.update_notes_widget.configure(state="disabled")
         if not package.expected_sha256:
             continue_without_hash = messagebox.askyesno(
                 "Integridad no verificada",

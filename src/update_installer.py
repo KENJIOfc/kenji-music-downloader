@@ -134,6 +134,14 @@ def safe_extract_tar(archive_path: Path, destination: Path) -> None:
                     "El TAR.GZ contiene demasiados archivos."
                 )
             for member in members:
+                # `tar -C carpeta .` genera una entrada raíz `./` legítima.
+                normalized_parts = tuple(
+                    part
+                    for part in PurePosixPath(member.name.replace("\\", "/")).parts
+                    if part not in {"", "."}
+                )
+                if member.isdir() and not normalized_parts:
+                    continue
                 _relative, output_path = _destination_for(destination, member.name)
                 if member.isdir():
                     output_path.mkdir(parents=True, exist_ok=True)

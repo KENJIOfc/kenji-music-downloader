@@ -1,13 +1,16 @@
 [CmdletBinding()]
 param(
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [string]$PythonExecutable = ""
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$PythonExecutable = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
+    $PythonExecutable = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
+}
 $SpecFile = Join-Path $ProjectRoot "kenji-music-downloader.spec"
 $BuildDirectory = Join-Path $ProjectRoot "build"
 $DistDirectory = Join-Path $ProjectRoot "dist"
@@ -39,6 +42,11 @@ if (-not (Test-Path -LiteralPath $PythonExecutable)) {
 
 Push-Location $ProjectRoot
 try {
+    $Version = (& $PythonExecutable -c "from src.config import APP_VERSION; print(APP_VERSION)").Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($Version)) {
+        throw "No se pudo leer APP_VERSION."
+    }
+
     if (-not $SkipTests) {
         & $PythonExecutable -m unittest discover -s tests -v
         if ($LASTEXITCODE -ne 0) {
@@ -47,7 +55,18 @@ try {
     }
 
     Remove-SafeBuildDirectory -TargetPath $BuildDirectory
-    Remove-SafeBuildDirectory -TargetPath $DistDirectory
+    if (-not (Test-Path -LiteralPath $DistDirectory)) {
+        New-Item -ItemType Directory -Path $DistDirectory | Out-Null
+    }
+    # Limpia solo artefactos Windows; conserva un TAR.GZ Linux ya copiado a dist.
+    Get-ChildItem -LiteralPath $DistDirectory -File | Where-Object {
+        $_.Name -in @(
+            "KenjiMusicDownloader.exe",
+            "KenjiUpdateInstaller.exe",
+            "update-windows.json",
+            "update.json"
+        ) -or $_.Name -like "KenjiMusicDownloader-v*-Windows-x64.zip"
+    } | Remove-Item -Force
 
     & $PythonExecutable -m PyInstaller --clean --noconfirm $SpecFile
     if ($LASTEXITCODE -ne 0) {
@@ -63,7 +82,6 @@ try {
         throw "No se generó el helper esperado: $UpdaterPath"
     }
 
-    $Version = (& $PythonExecutable -c "from src.config import APP_VERSION; print(APP_VERSION)").Trim()
     $ZipPath = Join-Path $DistDirectory "KenjiMusicDownloader-v$Version-Windows-x64.zip"
     $ArchiveParameters = @{
         LiteralPath = @(
@@ -77,30 +95,22 @@ try {
     }
     Compress-Archive @ArchiveParameters
 
-    $ZipHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $ZipPath).Hash.ToLowerInvariant()
-    $ManifestPath = Join-Path $DistDirectory "update.json"
-    $Manifest = @{
-        version = $Version
-        assets = @{
-            "windows-x64" = @{
-                name = [System.IO.Path]::GetFileName($ZipPath)
-                sha256 = $ZipHash
-            }
-        }
-        notes = "Actualización de Kenji Music Downloader v$Version"
-    } | ConvertTo-Json -Depth 5
-    [System.IO.File]::WriteAllText(
-        $ManifestPath,
-        $Manifest,
-        [System.Text.UTF8Encoding]::new($false)
-    )
+    & $PythonExecutable scripts\generate_update_manifest.py
+    if ($LASTEXITCODE -ne 0) {
+        throw "No se pudieron generar los manifests de actualización."
+    }
+    $PlatformManifestPath = Join-Path $DistDirectory "update-windows.json"
+    $CombinedManifestPath = Join-Path $DistDirectory "update.json"
 
     Write-Host ""
     Write-Host "Empaquetado completado correctamente."
     Write-Host "Ejecutable: $ExecutablePath"
     Write-Host "Helper: $UpdaterPath"
     Write-Host "Paquete para GitHub Releases: $ZipPath"
-    Write-Host "Manifest: $ManifestPath"
+    Write-Host "Manifest Windows: $PlatformManifestPath"
+    if (Test-Path -LiteralPath $CombinedManifestPath) {
+        Write-Host "Manifest combinado: $CombinedManifestPath"
+    }
 }
 finally {
     Pop-Location

@@ -33,6 +33,10 @@ DOWNLOAD_CHUNK_BYTES = 1024 * 1024
 OFFICIAL_REPOSITORY_PATH = "/kenjiofc/kenji-music-downloader/releases/download/"
 SHA256_PATTERN = re.compile(r"^[0-9a-fA-F]{64}$")
 MANIFEST_ASSET_NAME = "update.json"
+PLATFORM_MANIFEST_ASSET_NAMES = {
+    "windows-x64": "update-windows.json",
+    "linux-x64": "update-linux.json",
+}
 
 
 class UpdatePackageError(RuntimeError):
@@ -128,7 +132,7 @@ def detect_platform_key(
     if system_value == "linux":
         return "linux-x64"
     raise UpdatePackageError(
-        "No hay paquete de actualización disponible para este sistema operativo."
+        "La release no contiene paquete de actualización para este sistema operativo."
     )
 
 
@@ -182,30 +186,69 @@ def select_release_asset(
     )
 
 
-def _read_limited_json(response, maximum_bytes: int) -> object:
+def _read_limited_json(
+    response,
+    maximum_bytes: int,
+    manifest_name: str = MANIFEST_ASSET_NAME,
+) -> object:
     raw_data = response.read(maximum_bytes + 1)
     if len(raw_data) > maximum_bytes:
         raise UpdatePackageError("El manifest de actualización es demasiado grande.")
     try:
         return json.loads(raw_data.decode("utf-8-sig"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise UpdatePackageError("update.json no contiene JSON válido.") from error
+        raise UpdatePackageError(
+            f"{manifest_name} no contiene JSON válido."
+        ) from error
+
+
+def _normalize_platform_manifest(
+    manifest: object,
+    platform_key: str,
+    manifest_name: str,
+) -> dict:
+    """Convierte un manifest específico al esquema combinado interno."""
+    if not isinstance(manifest, dict):
+        raise UpdatePackageError(f"{manifest_name} debe contener un objeto JSON.")
+    declared_platform = manifest.get("platform")
+    if declared_platform != platform_key:
+        raise UpdatePackageError(
+            f"{manifest_name} no corresponde a {platform_key}."
+        )
+    asset = manifest.get("asset")
+    if not isinstance(asset, dict):
+        raise UpdatePackageError(
+            "La release no contiene paquete de actualización para este sistema operativo."
+        )
+    return {
+        "version": manifest.get("version"),
+        "assets": {platform_key: asset},
+        "notes": manifest.get("notes", ""),
+    }
 
 
 def fetch_update_manifest(
     result: UpdateResult,
+    platform_key: str | None = None,
     opener=None,
     timeout: float = UPDATE_DOWNLOAD_TIMEOUT_SECONDS,
+    manifest_name: str | None = None,
 ) -> object | None:
-    """Descarga el manifest opcional exclusivamente desde la release oficial."""
+    """Lee un manifest oficial; permite solicitar uno por nombre exacto."""
+    manifest_names = [manifest_name.lower()] if manifest_name else [MANIFEST_ASSET_NAME]
+    if not manifest_name and platform_key in PLATFORM_MANIFEST_ASSET_NAMES:
+        manifest_names.append(PLATFORM_MANIFEST_ASSET_NAMES[platform_key])
+    assets_by_name = {asset.name.lower(): asset for asset in result.assets}
     manifest_asset = next(
-        (asset for asset in result.assets if asset.name.lower() == MANIFEST_ASSET_NAME),
+        (assets_by_name[name] for name in manifest_names if name in assets_by_name),
         None,
     )
     if manifest_asset is None:
         return None
     if not _is_official_asset_url(manifest_asset.download_url):
-        raise UpdatePackageError("La URL de update.json no pertenece al repositorio oficial.")
+        raise UpdatePackageError(
+            f"La URL de {manifest_asset.name} no pertenece al repositorio oficial."
+        )
 
     request = Request(
         manifest_asset.download_url,
@@ -214,16 +257,33 @@ def fetch_update_manifest(
     open_request = opener or urlopen
     try:
         with open_request(request, timeout=max(1.0, float(timeout))) as response:
-            return _read_limited_json(response, MAX_MANIFEST_BYTES)
+            manifest = _read_limited_json(
+                response,
+                MAX_MANIFEST_BYTES,
+                manifest_asset.name,
+            )
+        log_info(
+            "Actualizaciones",
+            f"Manifest leído: {manifest_asset.name}.",
+        )
+        if manifest_asset.name.lower() == MANIFEST_ASSET_NAME:
+            return manifest
+        if platform_key is None:
+            return manifest
+        return _normalize_platform_manifest(
+            manifest,
+            platform_key,
+            manifest_asset.name,
+        )
     except UpdatePackageError:
         raise
     except HTTPError as error:
         raise UpdatePackageError(
-            f"No se pudo descargar update.json: HTTP {error.code}."
+            f"No se pudo descargar {manifest_asset.name}: HTTP {error.code}."
         ) from error
     except (URLError, socket.timeout, TimeoutError, ssl.SSLError, OSError) as error:
         raise UpdatePackageError(
-            "No se pudo descargar update.json desde GitHub Releases."
+            f"No se pudo descargar {manifest_asset.name} desde GitHub Releases."
         ) from error
 
 
@@ -248,7 +308,7 @@ def _package_from_manifest(
     platform_data = assets.get(platform_key) if isinstance(assets, dict) else None
     if not isinstance(platform_data, dict):
         raise UpdatePackageError(
-            "update.json no contiene un paquete para este sistema operativo."
+            "La release no contiene paquete de actualización para este sistema operativo."
         )
     asset_name = platform_data.get("name")
     if (
@@ -287,22 +347,62 @@ def prepare_update_package(
     machine_name: str | None = None,
     opener=None,
 ) -> UpdatePackage:
-    """Resuelve manifest y asset sin descargar todavía el paquete grande."""
-    platform_key, asset, package_kind = select_release_asset(
+    """Prefiere el combinado y usa el manifest específico ante cualquier fallo."""
+    platform_key, _asset, _package_kind = select_release_asset(
         result,
         system_name,
         machine_name,
     )
-    manifest = fetch_update_manifest(result, opener=opener)
-    if manifest is not None:
-        package = _package_from_manifest(result, manifest, platform_key)
-    else:
-        package = UpdatePackage(
-            version=str(SemanticVersion.parse(result.latest_version or "")),
-            platform_key=platform_key,
-            asset=asset,
-            package_kind=package_kind,
-            notes=result.release_notes,
+    available_manifests = {asset.name.lower() for asset in result.assets}
+    specific_name = PLATFORM_MANIFEST_ASSET_NAMES[platform_key]
+    package: UpdatePackage | None = None
+    combined_error: UpdatePackageError | None = None
+
+    if MANIFEST_ASSET_NAME in available_manifests:
+        try:
+            combined = fetch_update_manifest(
+                result,
+                platform_key=platform_key,
+                opener=opener,
+                manifest_name=MANIFEST_ASSET_NAME,
+            )
+            if combined is not None:
+                package = _package_from_manifest(result, combined, platform_key)
+        except UpdatePackageError as error:
+            combined_error = error
+            log_error(
+                "Actualizaciones",
+                f"Falló {MANIFEST_ASSET_NAME}; se intentará {specific_name}.",
+                error,
+            )
+
+    if package is None and specific_name in available_manifests:
+        try:
+            specific = fetch_update_manifest(
+                result,
+                platform_key=platform_key,
+                opener=opener,
+                manifest_name=specific_name,
+            )
+            if specific is not None:
+                package = _package_from_manifest(result, specific, platform_key)
+        except UpdatePackageError as error:
+            log_error(
+                "Actualizaciones",
+                f"Falló el manifest específico {specific_name}.",
+                error,
+            )
+            raise
+
+    if package is None:
+        if combined_error is not None:
+            raise combined_error
+        raise UpdatePackageError(
+            "No se encontró información de actualización para este sistema."
+        )
+    if package.expected_sha256 is None:
+        raise UpdatePackageError(
+            "El manifest de actualización no contiene un SHA-256 válido."
         )
     log_info(
         "Actualizaciones",
@@ -310,6 +410,48 @@ def prepare_update_package(
     )
     log_info("Actualizaciones", f"URL del asset: {package.asset.download_url}")
     return package
+
+
+def validate_release_manifest(
+    result: UpdateResult,
+    opener=None,
+    require_sha256: bool = True,
+) -> dict[str, UpdatePackage]:
+    """Valida un único update.json y sus paquetes Windows/Linux completos."""
+    manifest_asset = next(
+        (asset for asset in result.assets if asset.name.lower() == MANIFEST_ASSET_NAME),
+        None,
+    )
+    if manifest_asset is None:
+        raise UpdatePackageError(
+            "La release no contiene el archivo update.json requerido para la prueba."
+        )
+
+    log_info(
+        "Actualizaciones",
+        f"Manifest encontrado: {manifest_asset.download_url}",
+    )
+    manifest = fetch_update_manifest(
+        result,
+        opener=opener,
+        manifest_name=MANIFEST_ASSET_NAME,
+    )
+    if manifest is None:
+        raise UpdatePackageError("No se pudo leer update.json desde la release.")
+
+    packages: dict[str, UpdatePackage] = {}
+    for platform_key in ("windows-x64", "linux-x64"):
+        package = _package_from_manifest(result, manifest, platform_key)
+        if require_sha256 and package.expected_sha256 is None:
+            raise UpdatePackageError(
+                f"update.json no contiene SHA-256 para {platform_key}."
+            )
+        packages[platform_key] = package
+        log_info(
+            "Actualizaciones",
+            f"Manifest validado: {platform_key} -> {package.asset.name}.",
+        )
+    return packages
 
 
 def get_updates_directory(system_name: str | None = None) -> Path:

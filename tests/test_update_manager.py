@@ -126,6 +126,173 @@ class AssetSelectionTests(UpdateManagerTestCase):
         self.assertEqual(package.expected_sha256, "a" * 64)
         self.assertEqual(package.notes, "Notas del manifest")
 
+    def test_falls_back_to_windows_specific_manifest(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        manifest = {
+            "version": "1.0.4",
+            "platform": "windows-x64",
+            "asset": {"name": windows_name, "sha256": "c" * 64},
+            "notes": "Manifest Windows",
+        }
+        package = prepare_update_package(
+            make_result(
+                make_asset(windows_name),
+                make_asset("update-windows.json"),
+            ),
+            "Windows",
+            "AMD64",
+            opener=lambda _request, timeout: FakeResponse(
+                json.dumps(manifest).encode("utf-8")
+            ),
+        )
+        self.assertEqual(package.platform_key, "windows-x64")
+        self.assertEqual(package.expected_sha256, "c" * 64)
+        self.assertEqual(package.notes, "Manifest Windows")
+
+    def test_falls_back_to_linux_specific_manifest(self) -> None:
+        linux_name = "KenjiMusicDownloader-v1.0.4-Linux-x64.tar.gz"
+        manifest = {
+            "version": "1.0.4",
+            "platform": "linux-x64",
+            "asset": {"name": linux_name, "sha256": "d" * 64},
+        }
+        package = prepare_update_package(
+            make_result(
+                make_asset(linux_name),
+                make_asset("update-linux.json"),
+            ),
+            "Linux",
+            "x86_64",
+            opener=lambda _request, timeout: FakeResponse(
+                json.dumps(manifest).encode("utf-8")
+            ),
+        )
+        self.assertEqual(package.platform_key, "linux-x64")
+        self.assertEqual(package.asset.name, linux_name)
+        self.assertEqual(package.expected_sha256, "d" * 64)
+
+    def test_combined_manifest_has_priority_over_specific_manifest(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        combined = {
+            "version": "1.0.4",
+            "assets": {
+                "windows-x64": {
+                    "name": windows_name,
+                    "sha256": "a" * 64,
+                }
+            },
+        }
+        specific = {
+            "version": "1.0.4",
+            "platform": "windows-x64",
+            "asset": {"name": windows_name, "sha256": "b" * 64},
+        }
+
+        def opener(request, timeout):
+            payload = combined if request.full_url.endswith("update.json") else specific
+            return FakeResponse(json.dumps(payload).encode("utf-8"))
+
+        package = prepare_update_package(
+            make_result(
+                make_asset(windows_name),
+                make_asset("update.json"),
+                make_asset("update-windows.json"),
+            ),
+            "Windows",
+            "AMD64",
+            opener=opener,
+        )
+        self.assertEqual(package.expected_sha256, "a" * 64)
+
+    def test_missing_platform_in_combined_falls_back_to_specific(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        combined = {
+            "version": "1.0.4",
+            "assets": {
+                "linux-x64": {
+                    "name": "KenjiMusicDownloader-v1.0.4-Linux-x64.tar.gz",
+                    "sha256": "a" * 64,
+                }
+            },
+        }
+        specific = {
+            "version": "1.0.4",
+            "platform": "windows-x64",
+            "asset": {"name": windows_name, "sha256": "e" * 64},
+        }
+
+        def opener(request, timeout):
+            payload = combined if request.full_url.endswith("update.json") else specific
+            return FakeResponse(json.dumps(payload).encode("utf-8"))
+
+        package = prepare_update_package(
+            make_result(
+                make_asset(windows_name),
+                make_asset("update.json"),
+                make_asset("update-windows.json"),
+            ),
+            "Windows",
+            "AMD64",
+            opener=opener,
+        )
+        self.assertEqual(package.expected_sha256, "e" * 64)
+
+    def test_combined_download_failure_falls_back_to_specific(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        specific = {
+            "version": "1.0.4",
+            "platform": "windows-x64",
+            "asset": {"name": windows_name, "sha256": "f" * 64},
+        }
+
+        def opener(request, timeout):
+            if request.full_url.endswith("update.json"):
+                raise OSError("fallo simulado")
+            return FakeResponse(json.dumps(specific).encode("utf-8"))
+
+        package = prepare_update_package(
+            make_result(
+                make_asset(windows_name),
+                make_asset("update.json"),
+                make_asset("update-windows.json"),
+            ),
+            "Windows",
+            "AMD64",
+            opener=opener,
+        )
+        self.assertEqual(package.expected_sha256, "f" * 64)
+
+    def test_no_manifest_reports_clear_error(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        with self.assertRaisesRegex(
+            UpdatePackageError,
+            "No se encontró información de actualización para este sistema",
+        ):
+            prepare_update_package(
+                make_result(make_asset(windows_name)),
+                "Windows",
+                "AMD64",
+            )
+
+    def test_combined_without_platform_and_without_fallback_is_clear(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        combined = {"version": "1.0.4", "assets": {}}
+        with self.assertRaisesRegex(
+            UpdatePackageError,
+            "La release no contiene paquete de actualización",
+        ):
+            prepare_update_package(
+                make_result(
+                    make_asset(windows_name),
+                    make_asset("update.json"),
+                ),
+                "Windows",
+                "AMD64",
+                opener=lambda _request, timeout: FakeResponse(
+                    json.dumps(combined).encode("utf-8")
+                ),
+            )
+
 
 class UpdateDownloadTests(UpdateManagerTestCase):
     def test_simulated_download_verifies_sha256(self) -> None:

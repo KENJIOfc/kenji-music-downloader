@@ -63,6 +63,27 @@ class SafeExtractionTests(unittest.TestCase):
                 content,
             )
 
+    def test_tar_root_directory_marker_is_accepted(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            archive_path = root / "update.tar.gz"
+            content = b"linux"
+            with tarfile.open(archive_path, "w:gz") as archive:
+                root_entry = tarfile.TarInfo("./")
+                root_entry.type = tarfile.DIRTYPE
+                archive.addfile(root_entry)
+                executable = tarfile.TarInfo("./KenjiMusicDownloader")
+                executable.size = len(content)
+                archive.addfile(executable, BytesIO(content))
+
+            destination = root / "extracted"
+            safe_extract_tar(archive_path, destination)
+
+            self.assertEqual(
+                (destination / "KenjiMusicDownloader").read_bytes(),
+                content,
+            )
+
     def test_tar_path_traversal_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

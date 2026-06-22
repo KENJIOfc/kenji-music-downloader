@@ -5,7 +5,7 @@ YouTube y convertirlo al formato elegido. Está escrita en Python, ofrece una
 interfaz gráfica con Tkinter, usa la API de `yt-dlp` y delega la conversión a
 FFmpeg.
 
-Versión actual: **v1.0.5**.
+Versión actual: **v1.0.6**.
 
 > Usa esta herramienta únicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los términos aplicables.
@@ -83,7 +83,7 @@ FFmpeg manualmente y dejar `ffmpeg` y `ffprobe` disponibles en el `PATH`.
 Las versiones publicadas se distribuyen desde
 [GitHub Releases](https://github.com/KENJIOFC/kenji-music-downloader/releases).
 Para Windows, descarga el archivo con nombre similar a
-`KenjiMusicDownloader-v1.0.5-Windows-x64.zip`, extráelo y ejecuta
+`KenjiMusicDownloader-v1.0.6-Windows-x64.zip`, extráelo y ejecuta
 `KenjiMusicDownloader.exe`.
 
 Esta primera distribución no está firmada digitalmente. Windows SmartScreen o
@@ -191,14 +191,14 @@ SHA-256. Debe subirse como asset de la misma release:
 
 ```json
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "assets": {
     "windows-x64": {
-      "name": "KenjiMusicDownloader-v1.0.5-Windows-x64.zip",
+      "name": "KenjiMusicDownloader-v1.0.6-Windows-x64.zip",
       "sha256": "HASH_SHA256_WINDOWS"
     },
     "linux-x64": {
-      "name": "KenjiMusicDownloader-v1.0.5-Linux-x64.tar.gz",
+      "name": "KenjiMusicDownloader-v1.0.6-Linux-x64.tar.gz",
       "sha256": "HASH_SHA256_LINUX"
     }
   },
@@ -206,13 +206,20 @@ SHA-256. Debe subirse como asset de la misma release:
 }
 ```
 
-Hay una plantilla en `release/update.example.json`. Los scripts de build crean
-un `dist/update.json` para su plataforma; si una release contiene Windows y
-Linux, combina ambas entradas antes de subir un único manifest.
+Hay una plantilla en `release/update.example.json`. Windows genera
+`update-windows.json` y Linux genera `update-linux.json`, siempre con el hash
+real de su paquete. Cuando ambos paquetes están juntos en `dist`, el generador
+crea además el `update.json` combinado recomendado para GitHub Releases.
 
-Sin manifest la app puede continuar únicamente después de advertir que no hay
-un hash fuerte publicado. Las URLs siempre se limitan a los assets del
-repositorio oficial y ZIP/TAR rechazan path traversal y enlaces simbólicos.
+El actualizador busca primero `update.json`. Si ese archivo no está publicado,
+no puede descargarse, es inválido o no contiene el sistema actual, usa
+`update-windows.json` en Windows o `update-linux.json` en Linux. Ambos formatos
+se normalizan al mismo modelo interno antes de descargar. Si tampoco existe un
+manifest específico válido, la actualización se cancela con un mensaje claro.
+
+Sin manifest válido la app no descarga ni instala el paquete. Las URLs siempre
+se limitan a los assets del repositorio oficial y ZIP/TAR rechazan path
+traversal y enlaces simbólicos.
 
 La versión `v1.0.4` introduce el helper. Una instalación anterior que todavía
 no incluya `KenjiUpdateInstaller` necesita actualizarse manualmente una sola vez
@@ -228,11 +235,41 @@ Para que la detección funcione debe existir al menos una release publicada en
 GitHub. Si todavía no hay releases, la búsqueda manual muestra una explicación
 clara. Para probar el flujo:
 
-1. publica una release con tag `v1.0.5` y comprueba que la app indique que está
+1. publica una release con tag `v1.0.6` y comprueba que la app indique que está
    actualizada;
 2. publica después una release de prueba con una versión superior, como
-   `v1.0.6`;
+   `v1.0.7`;
 3. vuelve a buscar y la app ofrecerá descargar e instalar el paquete correcto.
+
+### Diagnóstico seguro del actualizador
+
+El módulo `src.update_diagnostics` prueba el mismo manifest, descarga, SHA-256 y
+extractor usados por la actualización real, pero trabaja únicamente dentro de
+una carpeta temporal. No inicia `KenjiUpdateInstaller`, no cierra la aplicación
+y no reemplaza archivos instalados.
+
+El comando documentado para dry-run es `python -m src.update_diagnostics`; el
+módulo `src.update_manager` permanece como biblioteca interna y no instala nada
+por sí solo.
+
+Para probar automáticamente el sistema actual contra la última release:
+
+```bash
+python -m src.update_diagnostics --dry-run --expect-version 1.0.6
+```
+
+También se puede comprobar explícitamente la selección de cada asset desde una
+sola máquina:
+
+```bash
+python -m src.update_diagnostics --dry-run --platform windows --expect-version 1.0.6
+python -m src.update_diagnostics --dry-run --platform linux --expect-version 1.0.6
+```
+
+El diagnóstico exige que el único `update.json` contenga entradas y SHA-256
+válidos para `windows-x64` y `linux-x64`. Registra URL consultada, manifest,
+sistema, asset, ruta temporal, hashes y resultado de extracción en el log local.
+Los temporales se eliminan al terminar, incluso cuando la prueba falla.
 
 ## Historial, herramientas y registro
 
@@ -274,6 +311,16 @@ En Windows, `settings.json` e `history.json` están en
 `~/.config/kenji-music-downloader/` o `XDG_CONFIG_HOME`. El registro se puede
 consultar desde **Ayuda > Ver registro de errores**. Si está vacío, la
 aplicación muestra `No hay errores registrados.`
+
+## Contacto y soporte
+
+La opción **Ayuda > Contacto / Soporte** muestra el contacto oficial por
+Discord. Desde esa ventana se puede abrir el perfil en el navegador o copiar el
+enlace al portapapeles:
+
+<https://discordapp.com/users/649369933226180658>
+
+Usa este contacto para soporte, dudas o reportar problemas de la aplicación.
 
 ## Probar en Windows
 
@@ -323,8 +370,8 @@ Si PowerShell impide activar el entorno virtual, puedes ejecutar sin activarlo:
 ## Crear el ejecutable para Windows
 
 PyInstaller debe ejecutarse en Windows para generar el `.exe`. El script de
-construcción elimina únicamente `build/` y `dist/`, ejecuta las pruebas,
-construye el ejecutable y crea el ZIP para GitHub Releases:
+construcción limpia `build/` y los artefactos Windows anteriores, conserva un
+paquete Linux presente en `dist`, ejecuta las pruebas y crea el ZIP:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
@@ -335,8 +382,9 @@ Resultados:
 ```text
 dist\KenjiMusicDownloader.exe
 dist\KenjiUpdateInstaller.exe
-dist\KenjiMusicDownloader-v1.0.5-Windows-x64.zip
-dist\update.json
+dist\KenjiMusicDownloader-v1.0.6-Windows-x64.zip
+dist\update-windows.json
+dist\update.json (solo si también está presente el paquete Linux)
 ```
 
 El comando manual equivalente es:
@@ -389,8 +437,9 @@ Resultados publicables:
 ```text
 dist/KenjiMusicDownloader
 dist/KenjiUpdateInstaller
-dist/KenjiMusicDownloader-v1.0.5-Linux-x64.tar.gz
-dist/update.json
+dist/KenjiMusicDownloader-v1.0.6-Linux-x64.tar.gz
+dist/update-linux.json
+dist/update.json (solo si también está presente el paquete Windows)
 ```
 
 El comando equivalente, si prefieres ejecutarlo manualmente, es:
@@ -421,6 +470,42 @@ chmod +x KenjiMusicDownloader
 chmod +x KenjiUpdateInstaller
 ./KenjiMusicDownloader
 ```
+
+## Publicación multiplataforma
+
+Después de copiar ambos paquetes a una misma carpeta `dist`, genera nuevamente
+los manifests desde la raíz del proyecto:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\generate_update_manifest.py
+```
+
+En Linux, el comando equivalente es:
+
+```bash
+python3 scripts/generate_update_manifest.py
+```
+
+La utilidad busca los nombres exactos de la versión centralizada, calcula los
+SHA-256 reales y crea:
+
+```text
+dist/update-windows.json
+dist/update-linux.json
+dist/update.json
+```
+
+Para GitHub Release `v1.0.6`, sube obligatoriamente:
+
+```text
+KenjiMusicDownloader-v1.0.6-Windows-x64.zip
+KenjiMusicDownloader-v1.0.6-Linux-x64.tar.gz
+update.json
+```
+
+Los manifests específicos son auxiliares y opcionales en la release. No edites
+hashes manualmente: vuelve a ejecutar el generador cada vez que cambie un
+paquete.
 
 ## Diagnosticar tiempos de descarga
 
@@ -515,6 +600,8 @@ kenji-music-downloader/
 │   ├── error_log.py
 │   ├── updates.py
 │   ├── update_manager.py
+│   ├── release_manifest.py
+│   ├── update_diagnostics.py
 │   ├── update_installer.py
 │   ├── security.py
 │   └── config.py
@@ -531,11 +618,14 @@ kenji-music-downloader/
 │   ├── test_user_settings.py
 │   ├── test_updates.py
 │   ├── test_update_manager.py
+│   ├── test_release_manifest.py
+│   ├── test_update_diagnostics.py
 │   ├── test_update_installer.py
 │   └── test_security.py
 ├── scripts/
 │   ├── build_windows.ps1
-│   └── build_linux.sh
+│   ├── build_linux.sh
+│   └── generate_update_manifest.py
 ├── kenji-music-downloader.spec
 ├── release/
 │   └── update.example.json
@@ -561,6 +651,10 @@ kenji-music-downloader/
   metadatos de assets.
 - `src/update_manager.py`: selecciona assets, lee el manifest, descarga, valida
   SHA-256 y lanza el helper.
+- `src/release_manifest.py`: genera manifests específicos y combinado usando
+  los hashes reales de los paquetes presentes en `dist`.
+- `src/update_diagnostics.py`: dry-run temporal del manifest, descarga, hash y
+  extracción para Windows o Linux sin instalar archivos.
 - `src/update_installer.py`: helper separado con extracción segura, backup,
   reemplazo, rollback y reinicio.
 - `src/config.py`: versión, rutas portables y validación de la carpeta de salida.
@@ -569,6 +663,8 @@ kenji-music-downloader/
 - `kenji-music-downloader.spec`: configuración portable de PyInstaller.
 - `scripts/build_linux.sh`: construcción repetible del ejecutable Linux.
 - `scripts/build_windows.ps1`: pruebas, construcción y ZIP publicable para Windows.
+- `scripts/generate_update_manifest.py`: crea los manifests de publicación desde
+  los paquetes existentes en `dist`.
 - `requirements.txt`: dependencias de Python, incluido PyInstaller.
 - `.gitignore`: excluye descargas, entornos y archivos generados.
 

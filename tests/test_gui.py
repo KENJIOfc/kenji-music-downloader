@@ -1,6 +1,7 @@
 """Pruebas de los formatos mostrados en la interfaz gráfica."""
 
 import unittest
+from unittest.mock import Mock, patch
 
 from src.audio_formats import (
     AUDIO_FORMATS,
@@ -8,8 +9,10 @@ from src.audio_formats import (
     DEFAULT_AUDIO_FORMAT_KEY,
     DEFAULT_AUDIO_QUALITY_KEY,
 )
+from src.config import SUPPORT_DISCORD_URL
 from src.gui import (
     HISTORY_VISIBLE_ROWS,
+    KenjiMusicDownloaderGUI,
     WINDOW_RESIZABLE,
     connection_delay_notice,
     fit_window_to_screen,
@@ -82,3 +85,31 @@ class GuiFormattingTests(unittest.TestCase):
         )
         self.assertEqual(fitted, (920, 680))
         self.assertEqual(minimum, (820, 580))
+
+    def test_support_url_is_the_official_discord_profile(self) -> None:
+        self.assertEqual(
+            SUPPORT_DISCORD_URL,
+            "https://discordapp.com/users/649369933226180658",
+        )
+
+    @patch("src.gui.webbrowser.open", return_value=True)
+    def test_support_link_opens_in_default_browser(self, open_mock) -> None:
+        gui = KenjiMusicDownloaderGUI.__new__(KenjiMusicDownloaderGUI)
+        gui.root = Mock()
+        gui.support_dialog = None
+
+        gui._open_support_link()
+
+        open_mock.assert_called_once_with(SUPPORT_DISCORD_URL, new=2)
+
+    @patch("src.gui.messagebox.showinfo")
+    def test_support_link_can_be_copied(self, showinfo_mock) -> None:
+        gui = KenjiMusicDownloaderGUI.__new__(KenjiMusicDownloaderGUI)
+        gui.root = Mock()
+        gui.support_dialog = None
+
+        gui._copy_support_link()
+
+        gui.root.clipboard_clear.assert_called_once_with()
+        gui.root.clipboard_append.assert_called_once_with(SUPPORT_DISCORD_URL)
+        showinfo_mock.assert_called_once()
