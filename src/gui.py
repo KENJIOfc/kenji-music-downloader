@@ -6,6 +6,7 @@ import queue
 import threading
 from time import perf_counter
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
 
@@ -28,12 +29,22 @@ from src.download_history import (
     load_download_history,
     remove_history_entry,
 )
-from src.error_log import ErrorLogReadError, log_error, log_info, read_error_log
+from src.error_log import (
+    ErrorLogClearError,
+    ErrorLogReadError,
+    clear_internal_logs,
+    log_error,
+    log_info,
+    read_error_log,
+)
 from src.config import (
     APP_DESCRIPTION,
     APP_NAME,
     APP_VERSION,
     DOWNLOADS_DIRECTORY,
+    LOGO_HEADER_IMAGE_PATH,
+    TASKBAR_ICON_PATH,
+    TASKBAR_ICON_PREVIEW_PATH,
     SUPPORT_DISCORD_URL,
     ConfigurationError,
     prepare_environment,
@@ -101,32 +112,67 @@ TIMING_ORDER = (
 )
 THEME_PALETTES = {
     "light": {
-        "background": "#f4f6f9",
-        "surface": "#ffffff",
-        "foreground": "#1f2937",
-        "muted": "#5f6b7a",
-        "accent": "#2563eb",
-        "selected": "#dbeafe",
-        "border": "#cbd5e1",
+        "background": "#eaf5ff",
+        "surface": "#f8fbff",
+        "panel": "#edf8ff",
+        "panel_alt": "#dff2ff",
+        "foreground": "#0b1f33",
+        "muted": "#456179",
+        "accent": "#0078d4",
+        "accent_2": "#00b7ff",
+        "selected": "#cceeff",
+        "border": "#7bcfff",
+        "glow": "#00a8ff",
+        "success": "#128a38",
+        "error": "#cc2444",
+        "warning": "#c77700",
     },
     "dark": {
-        "background": "#171a21",
-        "surface": "#232832",
-        "foreground": "#f3f4f6",
-        "muted": "#b8c0cc",
-        "accent": "#60a5fa",
-        "selected": "#334a68",
-        "border": "#46505f",
+        "background": "#020a14",
+        "surface": "#061827",
+        "panel": "#071f32",
+        "panel_alt": "#0a2a42",
+        "foreground": "#f3fbff",
+        "muted": "#8fb7d9",
+        "accent": "#00d8ff",
+        "accent_2": "#2d8cff",
+        "selected": "#0e4265",
+        "border": "#00aef0",
+        "glow": "#35e6ff",
+        "success": "#3ee56f",
+        "error": "#ff4d6d",
+        "warning": "#ffd166",
     },
 }
+NEON_PANEL_STYLE = "Neon.TLabelframe"
+NEON_PANEL_LABEL_STYLE = "Neon.TLabelframe.Label"
+NEON_SECTION_LABEL_STYLE = "SectionTitle.TLabel"
+NEON_TITLE_STYLE = "BrandTitle.TLabel"
+NEON_SUBTITLE_STYLE = "BrandSubtitle.TLabel"
+NEON_MUTED_STYLE = "Muted.TLabel"
+NEON_VALUE_STYLE = "Value.TLabel"
+NEON_PERCENT_STYLE = "Percent.TLabel"
+PRIMARY_BUTTON_STYLE = "Primary.TButton"
+SECONDARY_BUTTON_STYLE = "Secondary.TButton"
+DANGER_BUTTON_STYLE = "Danger.TButton"
+NEON_PROGRESS_STYLE = "Neon.Horizontal.TProgressbar"
+FONT_FAMILY_CANDIDATES = (
+    "Rajdhani",
+    "Bahnschrift",
+    "Segoe UI Semibold",
+    "Segoe UI",
+    "Noto Sans",
+    "DejaVu Sans",
+    "Arial",
+)
 WINDOW_SIZES_BY_SYSTEM = {
-    "Windows": ((1000, 720), (850, 600)),
-    "Linux": ((920, 680), (820, 580)),
+    "Windows": ((1050, 760), (860, 620)),
+    "Linux": ((960, 700), (820, 600)),
 }
-DEFAULT_WINDOW_SIZES = ((960, 700), (820, 580))
+DEFAULT_WINDOW_SIZES = ((1000, 720), (820, 600))
 SCREEN_EDGE_MARGINS = (40, 80)
 WINDOW_RESIZABLE = (False, False)
-HISTORY_VISIBLE_ROWS = 3
+HISTORY_VISIBLE_ROWS = 4
 
 
 def window_sizes_for_system(
@@ -159,6 +205,18 @@ def fit_window_to_screen(
 
 
 INITIAL_WINDOW_SIZE, MINIMUM_WINDOW_SIZE = window_sizes_for_system()
+
+
+def choose_font_family(
+    available_families: tuple[str, ...] | list[str] | set[str] | None = None,
+) -> str:
+    """Elige Rajdhani si existe o una alternativa moderna y legible."""
+    families = set(available_families or ())
+    normalized = {family.lower(): family for family in families}
+    for candidate in FONT_FAMILY_CANDIDATES:
+        if candidate.lower() in normalized:
+            return normalized[candidate.lower()]
+    return "TkDefaultFont"
 
 
 def format_bytes(value: int | float | None) -> str:
@@ -243,8 +301,13 @@ class KenjiMusicDownloaderGUI:
         self.support_dialog: tk.Toplevel | None = None
         self.update_installing = False
         self.style = ttk.Style(self.root)
+        self.ui_font_family = choose_font_family(tkfont.families(self.root))
         self.managed_menus: list[tk.Menu] = []
         self.history_item_entries: dict[str, DownloadHistoryEntry] = {}
+        # Las referencias se guardan en la instancia para que Tk no libere imágenes.
+        self.window_icon_image: tk.PhotoImage | None = None
+        self.logo_header_image: tk.PhotoImage | None = None
+        self.header_decoration_canvas: tk.Canvas | None = None
 
         saved_settings = load_user_settings()
         saved_format = get_audio_format(saved_settings.output_format)
@@ -312,6 +375,7 @@ class KenjiMusicDownloaderGUI:
             (self.root.winfo_screenwidth(), self.root.winfo_screenheight()),
         )
         self.root.title(APP_NAME)
+        self._set_window_icon()
         self.root.geometry(f"{window_size[0]}x{window_size[1]}")
         self.root.minsize(*fitted_minimum)
         self.root.maxsize(*window_size)
@@ -319,9 +383,34 @@ class KenjiMusicDownloaderGUI:
         self.root.resizable(*WINDOW_RESIZABLE)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
+    def _load_photo_image(self, image_path: Path) -> tk.PhotoImage | None:
+        """Carga una imagen PNG si existe, sin impedir que la app abra."""
+        try:
+            if image_path.is_file():
+                return tk.PhotoImage(file=str(image_path))
+        except tk.TclError as error:
+            log_error("Assets", f"No se pudo cargar la imagen {image_path}.", error)
+        return None
+
+    def _set_window_icon(self) -> None:
+        """Configura el icono de ventana en Windows y Linux usando los assets."""
+        if platform.system() == "Windows" and TASKBAR_ICON_PATH.is_file():
+            try:
+                self.root.iconbitmap(default=str(TASKBAR_ICON_PATH))
+                return
+            except tk.TclError as error:
+                log_error("Icono", "No se pudo aplicar logo_main.ico.", error)
+
+        self.window_icon_image = self._load_photo_image(TASKBAR_ICON_PREVIEW_PATH)
+        if self.window_icon_image is not None:
+            try:
+                self.root.iconphoto(True, self.window_icon_image)
+            except tk.TclError as error:
+                log_error("Icono", "No se pudo aplicar el icono PNG.", error)
+
     def _build_widgets(self) -> None:
         """Crea los controles usando únicamente componentes estándar de Tkinter."""
-        scroll_host = ttk.Frame(self.root)
+        scroll_host = ttk.Frame(self.root, style="Root.TFrame")
         scroll_host.pack(fill="both", expand=True)
         scroll_host.columnconfigure(0, weight=1)
         scroll_host.rowconfigure(0, weight=1)
@@ -341,7 +430,11 @@ class KenjiMusicDownloaderGUI:
         self.main_scrollbar.grid(row=0, column=1, sticky="ns")
         self.main_canvas.configure(yscrollcommand=self.main_scrollbar.set)
 
-        container = ttk.Frame(self.main_canvas, padding=(14, 9, 14, 8))
+        container = ttk.Frame(
+            self.main_canvas,
+            padding=(18, 10, 18, 8),
+            style="Main.TFrame",
+        )
         self.main_container = container
         self.main_canvas_window = self.main_canvas.create_window(
             (0, 0),
@@ -355,76 +448,144 @@ class KenjiMusicDownloaderGUI:
         self.root.bind_all("<Button-5>", self._on_main_mousewheel, add="+")
         container.columnconfigure(0, weight=1)
 
-        title = ttk.Label(
-            container,
-            text=APP_NAME,
-            font=("TkDefaultFont", 17, "bold"),
-        )
-        title.grid(row=0, column=0, columnspan=3, sticky="w")
+        header = ttk.Frame(container, padding=(16, 12), style="Header.TFrame")
+        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 9))
+        header.columnconfigure(1, weight=1)
+        header.columnconfigure(2, weight=1)
 
-        subtitle = ttk.Label(
-            container,
+        self.logo_header_image = self._load_photo_image(LOGO_HEADER_IMAGE_PATH)
+        if self.logo_header_image is None:
+            self.logo_header_image = self._load_photo_image(TASKBAR_ICON_PREVIEW_PATH)
+
+        logo_label = ttk.Label(header, style="Header.TLabel")
+        if self.logo_header_image is not None:
+            logo_label.configure(image=self.logo_header_image)
+        else:
+            logo_label.configure(text="♫", font=("TkDefaultFont", 44, "bold"))
+        logo_label.grid(row=0, column=0, rowspan=3, sticky="w", padx=(0, 16))
+
+        ttk.Label(header, text="Kenji Music", style=NEON_TITLE_STYLE).grid(
+            row=0,
+            column=1,
+            sticky="sw",
+        )
+        ttk.Label(
+            header,
+            text="D o w n l o a d e r",
+            style="BrandSubtitleLarge.TLabel",
+        ).grid(row=1, column=1, sticky="w", pady=(0, 3))
+        ttk.Label(
+            header,
             text="Descarga el audio de un video individual de YouTube.",
-        )
-        subtitle.grid(row=1, column=0, columnspan=3, sticky="w", pady=(2, 8))
+            style=NEON_SUBTITLE_STYLE,
+        ).grid(row=2, column=1, sticky="nw")
 
-        ttk.Label(container, text="Enlace de YouTube:").grid(
-            row=2, column=0, columnspan=3, sticky="w"
+        self.header_decoration_canvas = tk.Canvas(
+            header,
+            width=260,
+            height=104,
+            borderwidth=0,
+            highlightthickness=0,
         )
-        url_row = ttk.Frame(container)
-        url_row.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(3, 8))
+        self.header_decoration_canvas.grid(
+            row=0,
+            column=2,
+            rowspan=3,
+            sticky="e",
+            padx=(18, 0),
+        )
+        self.header_decoration_canvas.bind(
+            "<Configure>",
+            lambda _event: self._draw_header_decoration(),
+            add="+",
+        )
+
+        form_panel = ttk.LabelFrame(
+            container,
+            text="  ENLACE Y CONFIGURACIÓN  ",
+            padding=(14, 10, 14, 10),
+            style=NEON_PANEL_STYLE,
+        )
+        form_panel.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        form_panel.columnconfigure(0, weight=1)
+
+        ttk.Label(
+            form_panel,
+            text="🔗  Enlace de YouTube:",
+            style=NEON_SECTION_LABEL_STYLE,
+        ).grid(
+            row=0, column=0, columnspan=3, sticky="w"
+        )
+        url_row = ttk.Frame(form_panel, style="Panel.TFrame")
+        url_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 9))
         url_row.columnconfigure(0, weight=1)
         self.url_entry = ttk.Entry(url_row, textvariable=self.url_value)
-        self.url_entry.grid(row=0, column=0, sticky="ew")
+        self.url_entry.grid(row=0, column=0, sticky="ew", ipady=3)
         self.paste_button = ttk.Button(
             url_row,
-            text="Pegar enlace",
+            text="🔗  Pegar enlace",
             command=self._paste_link,
-            width=14,
+            width=18,
+            style=PRIMARY_BUTTON_STYLE,
         )
-        self.paste_button.grid(row=0, column=1, padx=(7, 0))
+        self.paste_button.grid(row=0, column=1, padx=(8, 0), ipady=2)
         self.clear_button = ttk.Button(
             url_row,
-            text="Limpiar",
+            text="🧹  Limpiar",
             command=self._clear_interface,
-            width=12,
+            width=14,
+            style=SECONDARY_BUTTON_STYLE,
         )
-        self.clear_button.grid(row=0, column=2, padx=(5, 0))
+        self.clear_button.grid(row=0, column=2, padx=(5, 0), ipady=2)
 
-        ttk.Label(container, text="Carpeta de salida:").grid(
-            row=4, column=0, columnspan=3, sticky="w"
+        ttk.Label(
+            form_panel,
+            text="📁  Carpeta de salida:",
+            style=NEON_SECTION_LABEL_STYLE,
+        ).grid(
+            row=2, column=0, columnspan=3, sticky="w"
         )
         self.output_entry = ttk.Entry(
-            container,
+            form_panel,
             textvariable=self.output_value,
             state="readonly",
         )
-        self.output_entry.grid(row=5, column=0, sticky="ew", pady=(3, 9))
+        self.output_entry.grid(row=3, column=0, sticky="ew", pady=(4, 9), ipady=3)
 
         self.folder_button = ttk.Button(
-            container,
-            text="Elegir carpeta...",
+            form_panel,
+            text="📂  Elegir carpeta...",
             command=self._select_output_directory,
-            width=16,
+            width=18,
+            style=SECONDARY_BUTTON_STYLE,
         )
-        self.folder_button.grid(row=5, column=1, padx=(7, 0), pady=(3, 9))
+        self.folder_button.grid(row=3, column=1, padx=(8, 0), pady=(4, 9))
 
         self.open_folder_button = ttk.Button(
-            container,
-            text="Abrir carpeta",
+            form_panel,
+            text="📂  Abrir carpeta",
             command=self._open_output_directory,
-            width=14,
+            width=17,
+            style=SECONDARY_BUTTON_STYLE,
         )
-        self.open_folder_button.grid(row=5, column=2, padx=(5, 0), pady=(3, 9))
+        self.open_folder_button.grid(row=3, column=2, padx=(6, 0), pady=(4, 9))
 
-        selectors = ttk.Frame(container)
-        selectors.grid(row=6, column=0, columnspan=3, sticky="ew", pady=(0, 9))
+        selectors = ttk.Frame(form_panel, style="Panel.TFrame")
+        selectors.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(0, 1))
         selectors.columnconfigure(0, weight=1)
         selectors.columnconfigure(1, weight=1)
-        ttk.Label(selectors, text="Formato de salida:").grid(
+        ttk.Label(
+            selectors,
+            text="🎵  Formato de salida:",
+            style=NEON_SECTION_LABEL_STYLE,
+        ).grid(
             row=0, column=0, sticky="w"
         )
-        ttk.Label(selectors, text="Calidad de audio:").grid(
+        ttk.Label(
+            selectors,
+            text="▥  Calidad de audio:",
+            style=NEON_SECTION_LABEL_STYLE,
+        ).grid(
             row=0, column=1, sticky="w", padx=(12, 0)
         )
         self.format_selector = ttk.Combobox(
@@ -438,6 +599,7 @@ class KenjiMusicDownloaderGUI:
             column=0,
             sticky="ew",
             pady=(3, 0),
+            ipady=2,
         )
         self.quality_selector = ttk.Combobox(
             selectors,
@@ -451,72 +613,109 @@ class KenjiMusicDownloaderGUI:
             sticky="ew",
             padx=(12, 0),
             pady=(3, 0),
+            ipady=2,
         )
         self.format_selector.bind("<<ComboboxSelected>>", self._preference_changed)
         self.quality_selector.bind("<<ComboboxSelected>>", self._preference_changed)
 
-        progress_row = ttk.Frame(container)
-        progress_row.grid(row=7, column=0, columnspan=3, sticky="ew")
+        progress_panel = ttk.LabelFrame(
+            container,
+            text="  PROGRESO DE DESCARGA  ",
+            padding=(14, 10, 14, 10),
+            style=NEON_PANEL_STYLE,
+        )
+        progress_panel.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 9))
+        progress_panel.columnconfigure(0, weight=1)
+
+        progress_row = ttk.Frame(progress_panel, style="Panel.TFrame")
+        progress_row.grid(row=0, column=0, sticky="ew")
         progress_row.columnconfigure(0, weight=1)
         self.progress_bar = ttk.Progressbar(
             progress_row,
             mode="determinate",
             maximum=100,
+            style=NEON_PROGRESS_STYLE,
         )
-        self.progress_bar.grid(row=0, column=0, sticky="ew")
-        ttk.Label(progress_row, textvariable=self.percentage_value, width=7).grid(
+        self.progress_bar.grid(row=0, column=0, sticky="ew", ipady=5)
+        ttk.Label(
+            progress_row,
+            textvariable=self.percentage_value,
+            width=7,
+            style=NEON_PERCENT_STYLE,
+        ).grid(
             row=0, column=1, padx=(10, 0)
         )
 
-        details = ttk.LabelFrame(container, text="Detalles del proceso", padding=7)
-        details.grid(row=8, column=0, columnspan=3, sticky="ew", pady=(8, 9))
+        details = ttk.LabelFrame(
+            container,
+            text="  DETALLES DEL PROCESO  ",
+            padding=(14, 10, 14, 10),
+            style=NEON_PANEL_STYLE,
+        )
+        details.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(0, 9))
         details.columnconfigure(1, weight=1)
         details.columnconfigure(3, weight=1)
         details.columnconfigure(5, weight=1)
 
-        ttk.Label(details, text="Estado actual:").grid(row=0, column=0, sticky="nw")
-        ttk.Label(details, textvariable=self.status_value, wraplength=560).grid(
+        ttk.Label(details, text="Estado actual:", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=0, column=0, sticky="nw"
+        )
+        ttk.Label(
+            details,
+            textvariable=self.status_value,
+            wraplength=560,
+            style=NEON_VALUE_STYLE,
+        ).grid(
             row=0, column=1, columnspan=5, sticky="w", padx=(8, 0)
         )
 
-        ttk.Label(details, text="Video:").grid(row=1, column=0, sticky="nw", pady=(3, 0))
+        ttk.Label(details, text="Video:", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=1, column=0, sticky="nw", pady=(3, 0)
+        )
         ttk.Label(
             details,
             textvariable=self.video_title_value,
+            style=NEON_MUTED_STYLE,
             wraplength=560,
         ).grid(row=1, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(3, 0))
 
-        ttk.Label(details, text="Tamaño:").grid(row=2, column=0, sticky="w", pady=(4, 0))
-        ttk.Label(details, textvariable=self.size_value).grid(
+        ttk.Label(details, text="Tamaño:", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=2, column=0, sticky="w", pady=(4, 0)
+        )
+        ttk.Label(details, textvariable=self.size_value, style=NEON_MUTED_STYLE).grid(
             row=2, column=1, sticky="w", padx=(6, 14), pady=(4, 0)
         )
-        ttk.Label(details, text="Velocidad:").grid(row=2, column=2, sticky="w", pady=(4, 0))
-        ttk.Label(details, textvariable=self.speed_value).grid(
+        ttk.Label(details, text="Velocidad:", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=2, column=2, sticky="w", pady=(4, 0)
+        )
+        ttk.Label(details, textvariable=self.speed_value, style=NEON_MUTED_STYLE).grid(
             row=2, column=3, sticky="w", padx=(6, 14), pady=(4, 0)
         )
-        ttk.Label(details, text="Tiempo restante:").grid(
+        ttk.Label(details, text="Tiempo restante:", style=NEON_SECTION_LABEL_STYLE).grid(
             row=2, column=4, sticky="w", pady=(4, 0)
         )
-        ttk.Label(details, textvariable=self.eta_value).grid(
+        ttk.Label(details, textvariable=self.eta_value, style=NEON_MUTED_STYLE).grid(
             row=2, column=5, sticky="w", padx=(6, 0), pady=(4, 0)
         )
 
-        ttk.Label(details, text="Tiempos:").grid(
+        ttk.Label(details, text="Tiempos:", style=NEON_SECTION_LABEL_STYLE).grid(
             row=3, column=0, sticky="nw", pady=(4, 0)
         )
         ttk.Label(
             details,
             textvariable=self.timings_value,
+            style=NEON_MUTED_STYLE,
             wraplength=580,
         ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(4, 0))
 
         history_frame = ttk.LabelFrame(
             container,
-            text="Historial de descargas (últimas 20)",
+            text="  HISTORIAL DE DESCARGAS (ÚLTIMAS 20)  ",
             padding=6,
+            style=NEON_PANEL_STYLE,
         )
         history_frame.grid(
-            row=9,
+            row=4,
             column=0,
             columnspan=3,
             sticky="ew",
@@ -540,11 +739,11 @@ class KenjiMusicDownloaderGUI:
             "path": "Ruta",
         }
         history_widths = {
-            "name": 280,
+            "name": 300,
             "format": 80,
             "quality": 105,
             "status": 105,
-            "path": 460,
+            "path": 420,
         }
         for column in history_columns:
             self.history_tree.heading(column, text=history_headings[column])
@@ -584,27 +783,31 @@ class KenjiMusicDownloaderGUI:
 
         ttk.Button(
             history_actions,
-            text="Abrir seleccionado",
+            text="↗  Abrir seleccionado",
             command=self._open_selected_history_file,
-            width=17,
+            width=21,
+            style=SECONDARY_BUTTON_STYLE,
         ).grid(row=0, column=0, padx=(0, 3))
         ttk.Button(
             history_actions,
-            text="Abrir su carpeta",
+            text="📁  Abrir su carpeta",
             command=self._open_selected_history_folder,
-            width=17,
+            width=20,
+            style=SECONDARY_BUTTON_STYLE,
         ).grid(row=0, column=1, padx=3)
         ttk.Button(
             history_actions,
-            text="Copiar ruta",
+            text="📋  Copiar ruta",
             command=self._copy_selected_history_path,
-            width=17,
+            width=18,
+            style=SECONDARY_BUTTON_STYLE,
         ).grid(row=0, column=2, padx=3)
         ttk.Button(
             history_actions,
-            text="Eliminar entrada",
+            text="🗑  Eliminar entrada",
             command=self._delete_selected_history_entry,
-            width=17,
+            width=20,
+            style=DANGER_BUTTON_STYLE,
         ).grid(row=0, column=3, padx=(3, 0))
 
         self.history_context_menu = tk.Menu(self.root, tearoff=False)
@@ -626,44 +829,99 @@ class KenjiMusicDownloaderGUI:
             command=self._delete_selected_history_entry,
         )
 
-        actions = ttk.Frame(container)
-        actions.grid(row=10, column=0, columnspan=3, sticky="ew")
+        actions = ttk.Frame(container, style="Main.TFrame")
+        actions.grid(row=5, column=0, columnspan=3, sticky="ew")
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(4, weight=1)
 
         self.download_button = ttk.Button(
             actions,
-            text="Descargar audio",
+            text="⬇  Descargar audio",
             command=self._start_download,
-            width=20,
+            width=24,
+            style=PRIMARY_BUTTON_STYLE,
         )
-        self.download_button.grid(row=0, column=1)
+        self.download_button.grid(row=0, column=1, ipady=4)
 
         self.cancel_button = ttk.Button(
             actions,
-            text="Cancelar",
+            text="⊗  Cancelar",
             command=self._cancel_download,
             state="disabled",
             width=14,
+            style=SECONDARY_BUTTON_STYLE,
         )
-        self.cancel_button.grid(row=0, column=2, padx=(10, 0))
+        self.cancel_button.grid(row=0, column=2, padx=(10, 0), ipady=4)
 
         self.open_file_button = ttk.Button(
             actions,
-            text="Abrir archivo",
+            text="▣  Abrir archivo",
             command=self._open_last_downloaded_file,
             state="disabled",
-            width=14,
+            width=16,
+            style=SECONDARY_BUTTON_STYLE,
         )
-        self.open_file_button.grid(row=0, column=3, padx=(8, 0))
+        self.open_file_button.grid(row=0, column=3, padx=(8, 0), ipady=4)
 
-        ttk.Label(container, text=f"v{APP_VERSION}").grid(
-            row=11,
+        ttk.Label(container, text=f"v{APP_VERSION}", style="Version.TLabel").grid(
+            row=6,
             column=0,
             columnspan=3,
             pady=(7, 0),
         )
         self.url_entry.focus_set()
+
+    def _draw_header_decoration(self) -> None:
+        """Dibuja una onda/equalizador ligero inspirado en la referencia visual."""
+        canvas = self.header_decoration_canvas
+        if canvas is None:
+            return
+
+        palette = THEME_PALETTES.get(self.theme_value.get(), THEME_PALETTES["dark"])
+        try:
+            width = max(canvas.winfo_width(), 260)
+            height = max(canvas.winfo_height(), 90)
+        except tk.TclError:
+            return
+
+        canvas.delete("all")
+        canvas.configure(background=palette["surface"])
+        baseline = int(height * 0.70)
+        canvas.create_line(0, baseline, width, baseline, fill=palette["selected"])
+
+        bar_count = 28
+        gap = max(4, width // (bar_count + 5))
+        start = max(8, width - (bar_count * gap) - 10)
+        for index in range(bar_count):
+            x = start + index * gap
+            bar_height = 12 + ((index * 13) % 55) + ((index * 7) % 19)
+            top = max(12, baseline - bar_height)
+            color = palette["accent"] if index % 3 else palette["accent_2"]
+            canvas.create_rectangle(
+                x,
+                top,
+                x + 3,
+                baseline,
+                fill=color,
+                outline=color,
+            )
+            if index % 5 == 0:
+                canvas.create_oval(
+                    x - 2,
+                    top - 8,
+                    x + 5,
+                    top - 1,
+                    fill=palette["glow"],
+                    outline="",
+                )
+
+        canvas.create_text(
+            width - 22,
+            28,
+            text="♪",
+            fill=palette["accent"],
+            font=("TkDefaultFont", 24, "bold"),
+        )
 
     def _update_main_scroll_region(self, _event: tk.Event | None = None) -> None:
         """Mantiene actualizado el recorrido vertical del contenido principal."""
@@ -720,6 +978,10 @@ class KenjiMusicDownloaderGUI:
         tools_menu.add_command(
             label="Limpiar historial",
             command=self._clear_history,
+        )
+        tools_menu.add_command(
+            label="Limpiar registros",
+            command=self._clear_internal_logs,
         )
         tools_menu.add_separator()
         tools_menu.add_command(
@@ -805,21 +1067,94 @@ class KenjiMusicDownloaderGUI:
         except tk.TclError:
             pass
 
+        font_family = getattr(self, "ui_font_family", "TkDefaultFont")
+        default_font = (font_family, 10)
+        medium_font = (font_family, 10, "bold")
+        section_font = (font_family, 11, "bold")
+        button_font = (font_family, 10, "bold")
+        tree_font = (font_family, 9)
+        tree_heading_font = (font_family, 10, "bold")
+        self.root.option_add("*Font", default_font)
+
         self.root.configure(background=palette["background"])
         self.main_canvas.configure(background=palette["background"])
         self.style.configure(
             ".",
             background=palette["background"],
             foreground=palette["foreground"],
+            font=default_font,
         )
         self.style.configure(
             "TFrame",
             background=palette["background"],
         )
+        self.style.configure("Root.TFrame", background=palette["background"])
+        self.style.configure("Main.TFrame", background=palette["background"])
+        self.style.configure(
+            "Header.TFrame",
+            background=palette["surface"],
+            borderwidth=1,
+            relief="solid",
+        )
+        self.style.configure("Header.TLabel", background=palette["surface"])
+        self.style.configure("Panel.TFrame", background=palette["surface"])
+        self.style.configure(
+            "Inner.TFrame",
+            background=palette["panel"],
+            borderwidth=1,
+            relief="solid",
+        )
         self.style.configure(
             "TLabel",
             background=palette["background"],
             foreground=palette["foreground"],
+        )
+        self.style.configure(
+            NEON_TITLE_STYLE,
+            background=palette["surface"],
+            foreground=palette["foreground"],
+            font=(font_family, 30, "bold"),
+        )
+        self.style.configure(
+            "BrandSubtitleLarge.TLabel",
+            background=palette["surface"],
+            foreground=palette["accent"],
+            font=(font_family, 17, "bold"),
+        )
+        self.style.configure(
+            NEON_SUBTITLE_STYLE,
+            background=palette["surface"],
+            foreground=palette["muted"],
+            font=(font_family, 10),
+        )
+        self.style.configure(
+            NEON_SECTION_LABEL_STYLE,
+            background=palette["surface"],
+            foreground=palette["accent"],
+            font=section_font,
+        )
+        self.style.configure(
+            NEON_MUTED_STYLE,
+            background=palette["surface"],
+            foreground=palette["muted"],
+        )
+        self.style.configure(
+            NEON_VALUE_STYLE,
+            background=palette["surface"],
+            foreground=palette["accent"],
+            font=medium_font,
+        )
+        self.style.configure(
+            NEON_PERCENT_STYLE,
+            background=palette["background"],
+            foreground=palette["accent"],
+            font=(font_family, 22, "bold"),
+        )
+        self.style.configure(
+            "Version.TLabel",
+            background=palette["background"],
+            foreground=palette["accent"],
+            font=(font_family, 10, "bold"),
         )
         self.style.configure(
             "SupportLink.TLabel",
@@ -828,22 +1163,85 @@ class KenjiMusicDownloaderGUI:
         )
         self.style.configure(
             "TLabelframe",
-            background=palette["background"],
+            background=palette["surface"],
             bordercolor=palette["border"],
         )
         self.style.configure(
             "TLabelframe.Label",
-            background=palette["background"],
+            background=palette["surface"],
             foreground=palette["foreground"],
+        )
+        self.style.configure(
+            NEON_PANEL_STYLE,
+            background=palette["surface"],
+            bordercolor=palette["border"],
+            lightcolor=palette["border"],
+            darkcolor=palette["selected"],
+        )
+        self.style.configure(
+            NEON_PANEL_LABEL_STYLE,
+            background=palette["surface"],
+            foreground=palette["accent"],
+            font=section_font,
         )
         self.style.configure(
             "TButton",
             padding=(7, 3),
             background=palette["surface"],
             foreground=palette["foreground"],
+            font=button_font,
         )
         self.style.map(
             "TButton",
+            background=[("active", palette["selected"])],
+            foreground=[("disabled", palette["muted"])],
+        )
+        self.style.configure(
+            SECONDARY_BUTTON_STYLE,
+            padding=(8, 4),
+            background=palette["surface"],
+            foreground=palette["foreground"],
+            bordercolor=palette["border"],
+            lightcolor=palette["border"],
+            darkcolor=palette["selected"],
+            font=button_font,
+        )
+        self.style.map(
+            SECONDARY_BUTTON_STYLE,
+            background=[
+                ("active", palette["selected"]),
+                ("disabled", palette["surface"]),
+            ],
+            foreground=[("disabled", palette["muted"])],
+        )
+        self.style.configure(
+            PRIMARY_BUTTON_STYLE,
+            padding=(9, 4),
+            background=palette["accent_2"],
+            foreground="#ffffff",
+            bordercolor=palette["glow"],
+            lightcolor=palette["glow"],
+            darkcolor=palette["accent"],
+            font=(font_family, 11, "bold"),
+        )
+        self.style.map(
+            PRIMARY_BUTTON_STYLE,
+            background=[
+                ("active", palette["accent"]),
+                ("disabled", palette["surface"]),
+            ],
+            foreground=[("disabled", palette["muted"])],
+        )
+        self.style.configure(
+            DANGER_BUTTON_STYLE,
+            padding=(8, 4),
+            background=palette["surface"],
+            foreground=palette["error"],
+            bordercolor=palette["error"],
+            font=button_font,
+        )
+        self.style.map(
+            DANGER_BUTTON_STYLE,
             background=[("active", palette["selected"])],
             foreground=[("disabled", palette["muted"])],
         )
@@ -871,7 +1269,8 @@ class KenjiMusicDownloaderGUI:
             fieldbackground=palette["surface"],
             foreground=palette["foreground"],
             bordercolor=palette["border"],
-            rowheight=22,
+            font=tree_font,
+            rowheight=23,
         )
         self.style.map(
             "Treeview",
@@ -882,12 +1281,21 @@ class KenjiMusicDownloaderGUI:
             "Treeview.Heading",
             background=palette["selected"],
             foreground=palette["foreground"],
+            font=tree_heading_font,
             padding=(5, 3),
         )
         self.style.configure(
             "Horizontal.TProgressbar",
             background=palette["accent"],
             troughcolor=palette["surface"],
+        )
+        self.style.configure(
+            NEON_PROGRESS_STYLE,
+            background=palette["accent"],
+            troughcolor=palette["panel_alt"],
+            bordercolor=palette["border"],
+            lightcolor=palette["glow"],
+            darkcolor=palette["accent_2"],
         )
 
         for menu in self.managed_menus:
@@ -897,15 +1305,19 @@ class KenjiMusicDownloaderGUI:
                     foreground=palette["foreground"],
                     activebackground=palette["selected"],
                     activeforeground=palette["foreground"],
+                    font=default_font,
                 )
             except tk.TclError:
                 pass
 
-        success_color = "#4ade80" if normalized_theme == "dark" else "#15803d"
-        error_color = "#f87171" if normalized_theme == "dark" else "#dc2626"
+        success_color = palette["success"]
+        error_color = palette["error"]
         self.history_tree.tag_configure("completed", foreground=success_color)
         self.history_tree.tag_configure("cancelled", foreground=palette["muted"])
         self.history_tree.tag_configure("error", foreground=error_color)
+
+        if self.header_decoration_canvas is not None:
+            self._draw_header_decoration()
 
         if self.support_dialog and self.support_dialog.winfo_exists():
             self.support_dialog.configure(background=palette["background"])
@@ -1147,6 +1559,34 @@ class KenjiMusicDownloaderGUI:
         except HistoryError as error:
             log_error("Historial", str(error), error)
             messagebox.showerror("Historial", str(error), parent=self.root)
+
+    def _clear_internal_logs(self) -> None:
+        """Limpia solo logs técnicos; no toca historial, ajustes ni descargas."""
+        if not messagebox.askyesno(
+            "Limpiar registros",
+            "¿Seguro que quieres limpiar los registros internos? "
+            "Esto no eliminará tus descargas, tu historial ni tu configuración.",
+            parent=self.root,
+        ):
+            return
+
+        try:
+            clear_internal_logs()
+        except ErrorLogClearError as error:
+            log_error("Registros", str(error), error)
+            messagebox.showerror(
+                "Limpiar registros",
+                "No se pudieron limpiar los registros internos. "
+                "Revisa los permisos de la carpeta de la aplicación.",
+                parent=self.root,
+            )
+            return
+
+        messagebox.showinfo(
+            "Limpiar registros",
+            "Registros limpiados correctamente.",
+            parent=self.root,
+        )
 
     def _open_last_downloaded_file(self) -> None:
         """Prioriza la fila seleccionada y usa después la última descarga."""

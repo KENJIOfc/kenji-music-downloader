@@ -23,6 +23,32 @@ MAX_ARCHIVE_MEMBERS = 5_000
 MAX_EXTRACTED_BYTES = 1_500 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
 PARENT_EXIT_TIMEOUT_SECONDS = 90
+PYINSTALLER_INTERNAL_DIRECTORY = "_internal"
+FORBIDDEN_PAYLOAD_PARTS = {
+    ".git",
+    ".venv",
+    "__pycache__",
+    ".pytest_cache",
+    ".mypy_cache",
+    ".ruff_cache",
+    "tests",
+    "build",
+    "dist",
+    "downloads",
+    "_backups",
+}
+FORBIDDEN_PAYLOAD_SUFFIXES = {
+    ".mp3",
+    ".m4a",
+    ".opus",
+    ".wav",
+    ".flac",
+    ".ogg",
+    ".log",
+    ".tmp",
+    ".bak",
+    ".part",
+}
 
 
 class UpdateInstallationFailure(RuntimeError):
@@ -186,22 +212,35 @@ def find_payload_root(extracted_directory: Path, main_name: str) -> Path:
 
 
 def validate_payload_files(payload_directory: Path, main_name: str) -> None:
-    """Acepta solo los dos binarios esperados y el README de la release."""
+    """Acepta la estructura onedir esperada sin fuentes, tests ni datos locales."""
     helper_name = (
         "KenjiUpdateInstaller.exe"
         if main_name.lower().endswith(".exe")
         else "KenjiUpdateInstaller"
     )
     required = {main_name, helper_name}
-    allowed = required | {"README.md"}
     names: set[str] = set()
     for path in payload_directory.rglob("*"):
         if not path.is_file():
             continue
         relative = path.relative_to(payload_directory)
-        if len(relative.parts) != 1 or relative.name not in allowed:
+        lowered_parts = {part.lower() for part in relative.parts}
+        if lowered_parts & FORBIDDEN_PAYLOAD_PARTS:
+            raise UpdateInstallationFailure(
+                f"El paquete contiene una carpeta no permitida: {relative}"
+            )
+        if relative.suffix.lower() in FORBIDDEN_PAYLOAD_SUFFIXES:
             raise UpdateInstallationFailure(
                 f"El paquete contiene un archivo no permitido: {relative}"
+            )
+        if len(relative.parts) == 1:
+            if relative.name not in required and relative.name != "README.md":
+                raise UpdateInstallationFailure(
+                    f"El paquete contiene un archivo no permitido: {relative}"
+                )
+        elif relative.parts[0] != PYINSTALLER_INTERNAL_DIRECTORY:
+            raise UpdateInstallationFailure(
+                f"El paquete contiene una ruta no esperada: {relative}"
             )
         names.add(relative.name)
     missing = required - names

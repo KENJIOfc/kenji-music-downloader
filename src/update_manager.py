@@ -524,6 +524,10 @@ def download_update(
     calculated = hashlib.sha256()
     downloaded = 0
     log_info("Actualizaciones", f"Inicio de descarga: {package.asset.name}")
+    log_info("Actualizaciones", f"URL oficial del asset: {package.asset.download_url}")
+    log_info("Actualizaciones", f"Destino temporal: {partial_path}")
+    log_info("Actualizaciones", f"Destino final: {final_path}")
+    log_info("Actualizaciones", f"Tipo de paquete: {package.package_kind}")
     try:
         partial_path.unlink(missing_ok=True)
         with open_request(
@@ -758,6 +762,13 @@ def launch_update_installer(
     ]
     if installation.appimage_target:
         command.extend(["--appimage-target", str(installation.appimage_target)])
+
+    log_info(
+        "Actualizaciones",
+        "Preparando helper confirmado por el usuario: "
+        f"helper={helper_copy}, paquete={downloaded.path}, "
+        f"instalación={installation.install_directory}",
+    )
 
     process_launcher = popen or subprocess.Popen
     kwargs: dict[str, object] = {

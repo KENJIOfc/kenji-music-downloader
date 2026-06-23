@@ -1,4 +1,4 @@
-"""Pruebas del diagnóstico no destructivo del actualizador."""
+﻿"""Pruebas del diagnÃ³stico no destructivo del actualizador."""
 
 from io import BytesIO
 import hashlib
@@ -21,10 +21,10 @@ from src.updates import ReleaseAsset, UpdateResult
 
 RELEASE_PREFIX = (
     "https://github.com/KENJIOFC/kenji-music-downloader/"
-    "releases/download/v1.0.6/"
+    "releases/download/v1.0.7/"
 )
-WINDOWS_NAME = "KenjiMusicDownloader-v1.0.6-Windows-x64.zip"
-LINUX_NAME = "KenjiMusicDownloader-v1.0.6-Linux-x64.tar.gz"
+WINDOWS_NAME = "KenjiMusicDownloader-v1.0.7-Windows-x64.zip"
+LINUX_NAME = "KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz"
 
 
 class FakeResponse(BytesIO):
@@ -41,8 +41,8 @@ def make_result() -> UpdateResult:
     return UpdateResult(
         success=True,
         update_available=False,
-        current_version="1.0.6",
-        latest_version="1.0.6",
+        current_version="1.0.7",
+        latest_version="1.0.7",
         assets=(
             make_asset(WINDOWS_NAME),
             make_asset(LINUX_NAME),
@@ -53,7 +53,7 @@ def make_result() -> UpdateResult:
 
 def make_manifest(windows_hash: str, linux_hash: str) -> dict:
     return {
-        "version": "1.0.6",
+        "version": "1.0.7",
         "assets": {
             "windows-x64": {"name": WINDOWS_NAME, "sha256": windows_hash},
             "linux-x64": {"name": LINUX_NAME, "sha256": linux_hash},
@@ -149,7 +149,7 @@ class UpdateDiagnosticsTests(unittest.TestCase):
         archive = make_windows_zip()
         expected_hash = hashlib.sha256(archive).hexdigest()
         manifest = {
-            "version": "1.0.6",
+            "version": "1.0.7",
             "platform": "windows-x64",
             "asset": {"name": WINDOWS_NAME, "sha256": expected_hash},
             "notes": "Fallback Windows",
@@ -157,8 +157,8 @@ class UpdateDiagnosticsTests(unittest.TestCase):
         release = UpdateResult(
             success=True,
             update_available=False,
-            current_version="1.0.6",
-            latest_version="1.0.6",
+            current_version="1.0.7",
+            latest_version="1.0.7",
             assets=(
                 make_asset(WINDOWS_NAME),
                 make_asset("update-windows.json"),
@@ -222,3 +222,4 @@ class UpdateDiagnosticsTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -13,6 +13,10 @@ class ErrorLogReadError(RuntimeError):
     """Error controlado al consultar el registro."""
 
 
+class ErrorLogClearError(RuntimeError):
+    """Error controlado al limpiar registros internos."""
+
+
 def get_error_log_path() -> Path:
     """Ubica el registro en una subcarpeta local dedicada."""
     return get_settings_path().parent / "logs" / "errors.log"
@@ -82,3 +86,58 @@ def read_error_log(log_path: Path | None = None) -> str:
         return path.read_text(encoding="utf-8").strip()
     except OSError as error:
         raise ErrorLogReadError("No se pudo leer el registro de errores.") from error
+
+
+def _is_relative_to(child: Path, parent: Path) -> bool:
+    """Comprueba contención de rutas sin depender de rutas fijas del sistema."""
+    try:
+        child.resolve(strict=False).relative_to(parent.resolve(strict=False))
+        return True
+    except ValueError:
+        return False
+
+
+def clear_internal_logs(
+    log_directory: Path | None = None,
+    legacy_log_path: Path | None = None,
+) -> int:
+    """Vacía únicamente archivos `.log` generados por la app.
+
+    No borra carpetas completas ni toca historial, configuración, descargas,
+    assets, ejecutables o manifests. Por seguridad solo actúa dentro de la
+    carpeta dedicada `logs/` y sobre el archivo legacy `errors.log`.
+    """
+    logs_dir = log_directory or get_error_log_path().parent
+    legacy_path = legacy_log_path or get_legacy_error_log_path()
+    candidates: set[Path] = {logs_dir / "errors.log", legacy_path}
+
+    try:
+        if logs_dir.exists():
+            candidates.update(
+                path for path in logs_dir.glob("*.log") if path.is_file()
+            )
+
+        cleared_count = 0
+        for path in sorted(candidates):
+            resolved_path = path.resolve(strict=False)
+            is_allowed_log = _is_relative_to(resolved_path, logs_dir)
+            is_legacy_log = (
+                resolved_path == legacy_path.resolve(strict=False)
+            )
+            if not (is_allowed_log or is_legacy_log):
+                continue
+            if resolved_path.suffix.lower() != ".log":
+                continue
+            if not resolved_path.exists() or not resolved_path.is_file():
+                continue
+
+            # Vaciar es más seguro que eliminar: evita borrar directorios o
+            # rutas inesperadas y conserva permisos/metadatos del archivo.
+            resolved_path.write_text("", encoding="utf-8")
+            cleared_count += 1
+
+        return cleared_count
+    except OSError as error:
+        raise ErrorLogClearError(
+            "No se pudieron limpiar los registros internos."
+        ) from error

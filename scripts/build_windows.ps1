@@ -36,6 +36,40 @@ function Remove-SafeBuildDirectory {
     }
 }
 
+function Compress-ArchiveWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationPath,
+        [int]$Attempts = 5,
+        [int]$DelaySeconds = 2
+    )
+
+    for ($Attempt = 1; $Attempt -le $Attempts; $Attempt++) {
+        try {
+            Compress-Archive `
+                -LiteralPath $SourcePath `
+                -DestinationPath $DestinationPath `
+                -CompressionLevel Optimal `
+                -Force
+            return
+        }
+        catch {
+            if ($Attempt -ge $Attempts) {
+                throw
+            }
+
+            Write-Warning (
+                "No se pudo crear el ZIP en el intento {0}/{1}: {2}. Reintentando en {3}s..." -f
+                $Attempt,
+                $Attempts,
+                $_.Exception.Message,
+                $DelaySeconds
+            )
+            Start-Sleep -Seconds $DelaySeconds
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     throw "No se encontró el entorno virtual: $PythonExecutable"
 }
@@ -67,33 +101,34 @@ try {
             "update.json"
         ) -or $_.Name -like "KenjiMusicDownloader-v*-Windows-x64.zip"
     } | Remove-Item -Force
+    Get-ChildItem -LiteralPath $DistDirectory -Directory | Where-Object {
+        $_.Name -like "KenjiMusicDownloader-v*-Windows-x64"
+    } | ForEach-Object {
+        Remove-SafeBuildDirectory -TargetPath $_.FullName
+    }
+    $OnedirOutput = Join-Path $DistDirectory "KenjiMusicDownloader"
+    if (Test-Path -LiteralPath $OnedirOutput) {
+        Remove-SafeBuildDirectory -TargetPath $OnedirOutput
+    }
 
     & $PythonExecutable -m PyInstaller --clean --noconfirm $SpecFile
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller terminó con código $LASTEXITCODE."
     }
 
-    $ExecutablePath = Join-Path $DistDirectory "KenjiMusicDownloader.exe"
-    $UpdaterPath = Join-Path $DistDirectory "KenjiUpdateInstaller.exe"
+    $ExecutablePath = Join-Path $OnedirOutput "KenjiMusicDownloader.exe"
+    $UpdaterPath = Join-Path $OnedirOutput "KenjiUpdateInstaller.exe"
     if (-not (Test-Path -LiteralPath $ExecutablePath)) {
         throw "No se generó el ejecutable esperado: $ExecutablePath"
     }
     if (-not (Test-Path -LiteralPath $UpdaterPath)) {
         throw "No se generó el helper esperado: $UpdaterPath"
     }
+    Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.md") `
+        -Destination (Join-Path $OnedirOutput "README.md") -Force
 
     $ZipPath = Join-Path $DistDirectory "KenjiMusicDownloader-v$Version-Windows-x64.zip"
-    $ArchiveParameters = @{
-        LiteralPath = @(
-            $ExecutablePath,
-            $UpdaterPath,
-            (Join-Path $ProjectRoot "README.md")
-        )
-        DestinationPath = $ZipPath
-        CompressionLevel = "Optimal"
-        Force = $true
-    }
-    Compress-Archive @ArchiveParameters
+    Compress-ArchiveWithRetry -SourcePath $OnedirOutput -DestinationPath $ZipPath
 
     & $PythonExecutable scripts\generate_update_manifest.py
     if ($LASTEXITCODE -ne 0) {

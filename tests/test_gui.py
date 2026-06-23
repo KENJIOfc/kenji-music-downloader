@@ -14,6 +14,7 @@ from src.gui import (
     HISTORY_VISIBLE_ROWS,
     KenjiMusicDownloaderGUI,
     WINDOW_RESIZABLE,
+    choose_font_family,
     connection_delay_notice,
     fit_window_to_screen,
     format_bytes,
@@ -64,15 +65,15 @@ class GuiFormattingTests(unittest.TestCase):
         self.assertIn("Puedes cancelar e intentar de nuevo", message_90 or "")
 
     def test_window_sizes_are_compact_on_windows_and_linux(self) -> None:
-        self.assertEqual(window_sizes_for_system("Windows"), ((1000, 720), (850, 600)))
-        self.assertEqual(window_sizes_for_system("Linux"), ((920, 680), (820, 580)))
+        self.assertEqual(window_sizes_for_system("Windows"), ((1050, 760), (860, 620)))
+        self.assertEqual(window_sizes_for_system("Linux"), ((960, 700), (820, 600)))
         self.assertEqual(WINDOW_RESIZABLE, (False, False))
-        self.assertEqual(HISTORY_VISIBLE_ROWS, 3)
+        self.assertEqual(HISTORY_VISIBLE_ROWS, 4)
 
     def test_window_fits_on_a_small_screen(self) -> None:
         fitted, minimum = fit_window_to_screen(
             (920, 680),
-            (820, 580),
+            (820, 600),
             (800, 600),
         )
         self.assertEqual(fitted, (760, 520))
@@ -83,8 +84,20 @@ class GuiFormattingTests(unittest.TestCase):
             *window_sizes_for_system("Linux"),
             (1366, 768),
         )
-        self.assertEqual(fitted, (920, 680))
-        self.assertEqual(minimum, (820, 580))
+        self.assertEqual(fitted, (960, 688))
+        self.assertEqual(minimum, (820, 600))
+
+    def test_prefers_rajdhani_when_available(self) -> None:
+        self.assertEqual(
+            choose_font_family(["Arial", "Rajdhani", "Segoe UI"]),
+            "Rajdhani",
+        )
+
+    def test_uses_modern_fallback_font(self) -> None:
+        self.assertEqual(
+            choose_font_family(["Arial", "Bahnschrift", "Segoe UI"]),
+            "Bahnschrift",
+        )
 
     def test_support_url_is_the_official_discord_profile(self) -> None:
         self.assertEqual(

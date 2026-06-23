@@ -15,6 +15,7 @@ from src.update_installer import (
     run_installer,
     safe_extract_tar,
     safe_extract_zip,
+    validate_payload_files,
 )
 
 
@@ -99,6 +100,42 @@ class SafeExtractionTests(unittest.TestCase):
 
 
 class BackupRollbackTests(unittest.TestCase):
+    def test_validates_pyinstaller_onedir_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            payload = Path(temporary_directory)
+            (payload / "KenjiMusicDownloader.exe").write_bytes(b"main")
+            (payload / "KenjiUpdateInstaller.exe").write_bytes(b"helper")
+            (payload / "README.md").write_text("info", encoding="utf-8")
+            internal = payload / "_internal"
+            internal.mkdir()
+            (internal / "python312.dll").write_bytes(b"dll")
+            (internal / "base_library.zip").write_bytes(b"zip")
+
+            validate_payload_files(payload, "KenjiMusicDownloader.exe")
+
+    def test_rejects_development_files_in_update_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            payload = Path(temporary_directory)
+            (payload / "KenjiMusicDownloader.exe").write_bytes(b"main")
+            (payload / "KenjiUpdateInstaller.exe").write_bytes(b"helper")
+            tests_directory = payload / "_internal" / "tests"
+            tests_directory.mkdir(parents=True)
+            (tests_directory / "test_gui.py").write_text("x", encoding="utf-8")
+
+            with self.assertRaisesRegex(UpdateInstallationFailure, "no permitida"):
+                validate_payload_files(payload, "KenjiMusicDownloader.exe")
+
+    def test_rejects_user_audio_files_in_update_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            payload = Path(temporary_directory)
+            (payload / "KenjiMusicDownloader.exe").write_bytes(b"main")
+            (payload / "KenjiUpdateInstaller.exe").write_bytes(b"helper")
+            (payload / "_internal").mkdir()
+            (payload / "_internal" / "cancion.mp3").write_bytes(b"audio")
+
+            with self.assertRaisesRegex(UpdateInstallationFailure, "no permitido"):
+                validate_payload_files(payload, "KenjiMusicDownloader.exe")
+
     def test_partial_failure_restores_previous_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)

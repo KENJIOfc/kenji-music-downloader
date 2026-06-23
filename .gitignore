@@ -36,6 +36,7 @@ cookies.txt
 # Resultados de PyInstaller
 build/
 dist/
+_backups/
 
 # Configuración de editores y sistema operativo
 .idea/

@@ -17,7 +17,7 @@ from src.audio_formats import (
 from src.config import DOWNLOADS_DIRECTORY
 
 
-DEFAULT_THEME = "light"
+DEFAULT_THEME = "dark"
 VALID_THEMES = {"light", "dark"}
 
 

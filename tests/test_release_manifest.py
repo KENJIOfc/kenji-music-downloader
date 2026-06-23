@@ -20,7 +20,7 @@ LINUX_NAME = f"KenjiMusicDownloader-v{VERSION}-Linux-x64.tar.gz"
 
 class ReleaseManifestTests(unittest.TestCase):
     def test_release_version_is_centralized(self) -> None:
-        self.assertEqual(APP_VERSION, "1.0.6")
+        self.assertEqual(APP_VERSION, "1.0.7")
 
     def test_generates_windows_manifest_with_real_hash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

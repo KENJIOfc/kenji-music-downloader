@@ -6,7 +6,7 @@ from tempfile import NamedTemporaryFile
 
 
 APP_NAME = "Kenji Music Downloader"
-APP_VERSION = "1.0.6"
+APP_VERSION = "1.0.7"
 APP_DESCRIPTION = "Descarga y convierte audio de YouTube de forma sencilla y segura."
 SUPPORT_DISCORD_URL = "https://discordapp.com/users/649369933226180658"
 
@@ -27,6 +27,28 @@ def _get_base_directory() -> Path:
 
 BASE_DIRECTORY = _get_base_directory()
 DOWNLOADS_DIRECTORY = BASE_DIRECTORY / "downloads"
+
+
+def _get_resource_directory() -> Path:
+    """Devuelve la carpeta donde PyInstaller expone recursos incluidos."""
+    bundled_directory = getattr(sys, "_MEIPASS", None)
+    if bundled_directory:
+        return Path(bundled_directory)
+    return BASE_DIRECTORY
+
+
+RESOURCE_DIRECTORY = _get_resource_directory()
+ASSETS_DIRECTORY = RESOURCE_DIRECTORY / "assets"
+LOGO_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main.png"
+LOGO_HEADER_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main_header.png"
+TASKBAR_ICON_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main.png"
+TASKBAR_ICON_PREVIEW_PATH = ASSETS_DIRECTORY / "logo_main_icon.png"
+TASKBAR_ICON_PATH = ASSETS_DIRECTORY / "logo_main.ico"
+UPDATE_INSTALLER_ICON_IMAGE_PATH = ASSETS_DIRECTORY / "updater_logo.png"
+UPDATE_INSTALLER_ICON_PREVIEW_PATH = ASSETS_DIRECTORY / "updater_logo_icon.png"
+UPDATE_INSTALLER_ICON_PATH = ASSETS_DIRECTORY / "updater_logo.ico"
+TYPOGRAPHY_REFERENCE_IMAGE_PATH = ASSETS_DIRECTORY / "typography_reference.png"
+INTERFACE_REFERENCE_IMAGE_PATH = ASSETS_DIRECTORY / "interface_reference_new.png"
 
 
 class ConfigurationError(RuntimeError):

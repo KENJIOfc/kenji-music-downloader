@@ -10,27 +10,31 @@ version="$(python -c 'from src.config import APP_VERSION; print(APP_VERSION)')"
 
 # Limpia únicamente artefactos Linux; conserva un ZIP Windows presente en dist.
 mkdir -p dist
-rm -f dist/KenjiMusicDownloader dist/KenjiUpdateInstaller
+rm -rf dist/KenjiMusicDownloader
+rm -f dist/KenjiUpdateInstaller
 rm -f dist/KenjiMusicDownloader-v*-Linux-x64.tar.gz
 rm -f dist/update-linux.json dist/update.json
 
 python -m PyInstaller --clean --noconfirm kenji-music-downloader.spec
 
 asset_name="KenjiMusicDownloader-v${version}-Linux-x64.tar.gz"
-release_stage="$project_root/build/release-linux"
-rm -rf "$release_stage"
-mkdir -p "$release_stage"
-cp dist/KenjiMusicDownloader "$release_stage/"
-cp dist/KenjiUpdateInstaller "$release_stage/"
-cp README.md "$release_stage/"
-# Enumera los archivos para no crear la entrada raíz `./`; esto conserva
-# compatibilidad con helpers de actualización publicados anteriormente.
-tar -czf "dist/$asset_name" -C "$release_stage" \
-    KenjiMusicDownloader KenjiUpdateInstaller README.md
+onedir_output="$project_root/dist/KenjiMusicDownloader"
+main_executable="$onedir_output/KenjiMusicDownloader"
+helper_executable="$onedir_output/KenjiUpdateInstaller"
+if [[ ! -f "$main_executable" ]]; then
+    echo "No se generó el ejecutable esperado: $main_executable" >&2
+    exit 1
+fi
+if [[ ! -f "$helper_executable" ]]; then
+    echo "No se generó el helper esperado: $helper_executable" >&2
+    exit 1
+fi
+cp README.md "$onedir_output/"
+tar -czf "dist/$asset_name" -C "$project_root/dist" KenjiMusicDownloader
 python scripts/generate_update_manifest.py
 
-echo "Ejecutable creado en: $project_root/dist/KenjiMusicDownloader"
-echo "Helper creado en: $project_root/dist/KenjiUpdateInstaller"
+echo "Ejecutable creado en: $main_executable"
+echo "Helper creado en: $helper_executable"
 echo "Paquete creado en: $project_root/dist/$asset_name"
 echo "Manifest Linux creado en: $project_root/dist/update-linux.json"
 if [[ -f "$project_root/dist/update.json" ]]; then
