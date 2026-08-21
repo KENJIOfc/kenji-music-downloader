@@ -64,7 +64,13 @@ TimingCallback = Callable[[TimingMetric], None]
 def _find_deno_executable() -> Path | None:
     """Localiza el runtime oficial sin aceptar rutas proporcionadas por el usuario."""
     executable_name = "deno.exe" if sys.platform == "win32" else "deno"
-    candidates = [Path(sys.executable).resolve().parent / executable_name]
+    candidates = [
+        Path(sys.executable).parent / executable_name,
+        Path(sys.prefix)
+        / ("Scripts" if sys.platform == "win32" else "bin")
+        / executable_name,
+        Path(sys.executable).resolve().parent / executable_name,
+    ]
 
     bundle_directory = getattr(sys, "_MEIPASS", None)
     if bundle_directory:

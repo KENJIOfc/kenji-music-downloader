@@ -1,0 +1,10 @@
+{
+  "version": "1.0.8",
+  "platform": "linux-x64",
+  "asset": {
+    "name": "YugenAudio-v1.0.8-Linux-x64.AppImage",
+    "sha256": "15f3c23c8f6084526ed48c2ea1f5e68022a131704cfb2d3ec2128a20757b0c3d",
+    "size": 167457984
+  },
+  "notes": "Actualización de Yūgen Audio v1.0.8"
+}

@@ -71,6 +71,9 @@ tcl_tk_hidden_imports = [
     "tkinter.messagebox",
     "tkinter.ttk",
 ]
+pillow_tk_hidden_imports = [
+    "PIL._tkinter_finder",
+]
 if tcl_tk_root:
     os.environ["TCL_LIBRARY"] = str(tcl_tk_root / "tcl8.6")
     os.environ["TK_LIBRARY"] = str(tcl_tk_root / "tk8.6")
@@ -195,6 +198,7 @@ analysis = Analysis(
         yt_dlp_hidden_imports
         + ejs_hidden_imports
         + tcl_tk_hidden_imports
+        + pillow_tk_hidden_imports
     ),
     hookspath=[],
     hooksconfig={},

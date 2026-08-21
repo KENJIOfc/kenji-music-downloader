@@ -151,9 +151,10 @@ estable:
 https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip
 ```
 
-La instalaciÃ³n automÃ¡tica estÃ¡ disponible para Windows x64. En Linux se usa el
-paquete FFmpeg de la distribuciÃ³n. Quien lo prefiera tambiÃ©n puede instalar
-FFmpeg manualmente y dejar `ffmpeg` y `ffprobe` disponibles en el `PATH`.
+La instalación automática está disponible para Windows x64. Los paquetes Linux
+oficiales incluyen FFmpeg y FFprobe dentro del build; en modo desarrollo también
+puedes usar el paquete FFmpeg de la distribución si `ffmpeg` y `ffprobe` están
+disponibles en el `PATH`.
 
 ## Descargar desde GitHub Releases
 
@@ -164,9 +165,9 @@ Para Windows, descarga el archivo con nombre similar a
 `YugenAudio.exe`.
 
 Para Linux, usa Ãºnicamente paquetes generados y probados nativamente en Linux.
-El formato principal previsto es `YugenAudio-v1.0.8-Linux-x64.AppImage`; si se
-publica, dale permiso de ejecuciÃ³n con `chmod +x` y Ã¡brelo directamente. El
-TAR.GZ y el paquete DEB son formatos auxiliares del mismo flujo de build.
+El formato principal es `YugenAudio-v1.0.8-Linux-x64.AppImage`: dale permiso de
+ejecución con `chmod +x` y ábrelo directamente. El TAR.GZ y el paquete DEB son
+formatos auxiliares del mismo flujo de build.
 
 Esta distribuciÃ³n no estÃ¡ firmada digitalmente. Windows SmartScreen, Smart App
 Control o una polÃ­tica corporativa pueden mostrar una advertencia o bloquear
@@ -663,17 +664,17 @@ dist/update.json
 ```
 
 Para GitHub Release `v1.0.8`, sube los artefactos verificados de cada
-plataforma. Windows puede publicarse con su manifest especÃ­fico aunque Linux
-todavÃ­a estÃ© pendiente de build nativo. Cuando Windows y Linux estÃ©n juntos y
-verificados, sube tambiÃ©n `update.json` combinado.
+plataforma. Cuando Windows y Linux estén juntos y verificados, sube también
+`update.json` combinado.
 
 ```text
 YugenAudio-v1.0.8-Windows-x64.zip
 update-windows.json
-YugenAudio-v1.0.8-Linux-x64.AppImage (solo despuÃ©s de build/prueba en Linux)
-YugenAudio-v1.0.8-Linux-x64.tar.gz (solo despuÃ©s de build/prueba en Linux)
-update-linux.json (solo despuÃ©s de build/prueba en Linux)
-update.json (solo cuando ambas plataformas verificadas estÃ©n presentes)
+YugenAudio-v1.0.8-Linux-x64.AppImage
+YugenAudio-v1.0.8-Linux-x64.tar.gz
+yugen-audio_1.0.8_amd64.deb
+update-linux.json
+update.json
 ```
 
 Los manifests especÃ­ficos son auxiliares y opcionales en la release. No edites

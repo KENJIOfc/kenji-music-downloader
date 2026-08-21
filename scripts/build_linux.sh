@@ -44,7 +44,14 @@ copy_optional_ffmpeg_notices() {
     parent_directory="$(dirname "$binary_directory")"
 
     for directory in "$binary_directory" "$parent_directory"; do
-        for notice_name in LICENSE COPYING README.txt; do
+        for notice_name in \
+            LICENSE \
+            LICENSE.txt \
+            COPYING \
+            COPYING.txt \
+            GPLv3.txt \
+            README.txt \
+            readme.txt; do
             local notice_path="$directory/$notice_name"
             if [[ ! -f "$notice_path" ]]; then
                 continue
