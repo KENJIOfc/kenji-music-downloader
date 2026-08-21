@@ -42,9 +42,9 @@ class UpdateDryRunResult:
 
 def _main_executable_name(platform_key: str) -> str:
     return (
-        "KenjiMusicDownloader.exe"
+        "YugenAudio.exe"
         if platform_key == "windows-x64"
-        else "KenjiMusicDownloader"
+        else "YugenAudio"
     )
 
 

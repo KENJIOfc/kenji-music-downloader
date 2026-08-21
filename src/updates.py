@@ -188,7 +188,7 @@ def check_for_updates(
         GITHUB_API_URL,
         headers={
             "Accept": "application/vnd.github+json",
-            "User-Agent": f"Kenji-Music-Downloader/{current_version}",
+            "User-Agent": f"Yugen-Audio/{current_version}",
             "X-GitHub-Api-Version": "2022-11-28",
         },
     )

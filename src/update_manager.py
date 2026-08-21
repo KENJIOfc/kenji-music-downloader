@@ -37,6 +37,10 @@ PLATFORM_MANIFEST_ASSET_NAMES = {
     "windows-x64": "update-windows.json",
     "linux-x64": "update-linux.json",
 }
+APP_ASSET_PREFIX = "YugenAudio"
+LEGACY_APP_ASSET_PREFIX = "KenjiMusicDownloader"
+UPDATE_HELPER_BASENAME = "YugenAudioUpdateInstaller"
+LEGACY_UPDATE_HELPER_BASENAME = "KenjiUpdateInstaller"
 
 
 class UpdatePackageError(RuntimeError):
@@ -68,6 +72,7 @@ class UpdatePackage:
     asset: ReleaseAsset
     package_kind: str
     expected_sha256: str | None = None
+    expected_size: int | None = None
     notes: str = ""
 
 
@@ -152,14 +157,22 @@ def _asset_kind(asset_name: str, platform_key: str) -> str:
 
 def _expected_asset_names(version: str, platform_key: str) -> tuple[str, ...]:
     normalized_version = str(SemanticVersion.parse(version))
-    prefix = f"KenjiMusicDownloader-v{normalized_version}"
-    if platform_key == "windows-x64":
-        return (f"{prefix}-Windows-x64.zip",)
-    return (
-        f"{prefix}-Linux-x64.AppImage",
-        f"{prefix}-Linux-x64.tar.gz",
-        f"{prefix}-Linux-x64.zip",
+    prefixes = (
+        f"{APP_ASSET_PREFIX}-v{normalized_version}",
+        f"{LEGACY_APP_ASSET_PREFIX}-v{normalized_version}",
     )
+    if platform_key == "windows-x64":
+        return tuple(f"{prefix}-Windows-x64.zip" for prefix in prefixes)
+    names: list[str] = []
+    for prefix in prefixes:
+        names.extend(
+            (
+                f"{prefix}-Linux-x64.AppImage",
+                f"{prefix}-Linux-x64.tar.gz",
+                f"{prefix}-Linux-x64.zip",
+            )
+        )
+    return tuple(names)
 
 
 def select_release_asset(
@@ -252,7 +265,7 @@ def fetch_update_manifest(
 
     request = Request(
         manifest_asset.download_url,
-        headers={"User-Agent": f"Kenji-Music-Downloader/{result.current_version}"},
+        headers={"User-Agent": f"Yugen-Audio/{result.current_version}"},
     )
     open_request = opener or urlopen
     try:
@@ -330,6 +343,16 @@ def _package_from_manifest(
         if not isinstance(raw_sha256, str) or SHA256_PATTERN.fullmatch(raw_sha256) is None:
             raise UpdatePackageError("update.json contiene un SHA-256 inválido.")
         expected_sha256 = raw_sha256.lower()
+    raw_size = platform_data.get("size")
+    expected_size: int | None = None
+    if raw_size is not None:
+        if not isinstance(raw_size, int) or raw_size < 0:
+            raise UpdatePackageError("update.json contiene un tamaño de asset inválido.")
+        expected_size = raw_size
+        if asset.size is not None and asset.size != expected_size:
+            raise UpdatePackageError(
+                "El tamaño indicado por update.json no coincide con GitHub Releases."
+            )
     notes = manifest.get("notes")
     return UpdatePackage(
         version=str(SemanticVersion.parse(result.latest_version)),
@@ -337,6 +360,7 @@ def _package_from_manifest(
         asset=asset,
         package_kind=_asset_kind(asset.name, platform_key),
         expected_sha256=expected_sha256,
+        expected_size=expected_size,
         notes=notes if isinstance(notes, str) else result.release_notes,
     )
 
@@ -409,6 +433,8 @@ def prepare_update_package(
         f"Asset seleccionado: {package.asset.name} ({package.platform_key}).",
     )
     log_info("Actualizaciones", f"URL del asset: {package.asset.download_url}")
+    if package.expected_size is not None:
+        log_info("Actualizaciones", f"Tamaño esperado: {package.expected_size} bytes")
     return package
 
 
@@ -476,10 +502,15 @@ def _cleanup_partial_files(updates_directory: Path) -> None:
 def _cleanup_old_update_files(updates_directory: Path, keep: Path) -> None:
     """Elimina paquetes y helpers de versiones anteriores solo dentro de updates."""
     patterns = (
+        "YugenAudio-v*-Windows-x64.zip",
+        "YugenAudio-v*-Linux-x64.zip",
+        "YugenAudio-v*-Linux-x64.tar.gz",
+        "YugenAudio-v*-Linux-x64.AppImage",
         "KenjiMusicDownloader-v*-Windows-x64.zip",
         "KenjiMusicDownloader-v*-Linux-x64.zip",
         "KenjiMusicDownloader-v*-Linux-x64.tar.gz",
         "KenjiMusicDownloader-v*-Linux-x64.AppImage",
+        "YugenAudioUpdateInstaller-v*",
         "KenjiUpdateInstaller-v*",
     )
     for pattern in patterns:
@@ -518,7 +549,7 @@ def download_update(
     _cleanup_old_update_files(target_directory, final_path)
     request = Request(
         package.asset.download_url,
-        headers={"User-Agent": f"Kenji-Music-Downloader/{package.version}"},
+        headers={"User-Agent": f"Yugen-Audio/{package.version}"},
     )
     open_request = opener or urlopen
     calculated = hashlib.sha256()
@@ -576,6 +607,10 @@ def download_update(
                 raise UpdateIntegrityError(
                     "La verificación de integridad falló. La actualización no se instalará."
                 )
+        if package.expected_size is not None and downloaded != package.expected_size:
+            raise UpdateIntegrityError(
+                "El tamaño del paquete descargado no coincide con el manifest."
+            )
         partial_path.replace(final_path)
         log_info("Actualizaciones", f"Descarga completada: {final_path}")
         return DownloadedUpdate(
@@ -648,7 +683,7 @@ def detect_installation_context() -> InstallationContext:
         main_executable=main_executable,
         helper_executable=helper,
         supported=helper is not None,
-        error_message="No se encontró KenjiUpdateInstaller junto a la aplicación."
+        error_message="No se encontró YugenAudioUpdateInstaller junto a la aplicación."
         if helper is None
         else "",
     )
@@ -658,15 +693,25 @@ def _find_packaged_helper(
     install_directory: Path,
     platform_key: str,
 ) -> Path | None:
-    filename = (
-        "KenjiUpdateInstaller.exe"
+    preferred = (
+        f"{UPDATE_HELPER_BASENAME}.exe"
         if platform_key == "windows-x64"
-        else "KenjiUpdateInstaller"
+        else UPDATE_HELPER_BASENAME
     )
-    candidates = [install_directory / filename]
+    legacy = (
+        f"{LEGACY_UPDATE_HELPER_BASENAME}.exe"
+        if platform_key == "windows-x64"
+        else LEGACY_UPDATE_HELPER_BASENAME
+    )
+    candidates = [install_directory / preferred, install_directory / legacy]
+    if getattr(sys, "frozen", False):
+        executable_directory = Path(sys.executable).resolve().parent
+        candidates.append(executable_directory / preferred)
+        candidates.append(executable_directory / legacy)
     bundle_directory = getattr(sys, "_MEIPASS", None)
     if bundle_directory:
-        candidates.append(Path(bundle_directory) / filename)
+        candidates.append(Path(bundle_directory) / preferred)
+        candidates.append(Path(bundle_directory) / legacy)
     return next((path.resolve() for path in candidates if path.is_file()), None)
 
 
@@ -726,14 +771,15 @@ def launch_update_installer(
     updates_directory = downloaded.path.parent
     helper_suffix = ".exe" if installation.platform_key == "windows-x64" else ""
     helper_copy = updates_directory / (
-        f"KenjiUpdateInstaller-v{downloaded.package.version}{helper_suffix}"
+        f"{UPDATE_HELPER_BASENAME}-v{downloaded.package.version}{helper_suffix}"
     )
-    for old_helper in updates_directory.glob("KenjiUpdateInstaller-v*"):
-        if old_helper != helper_copy:
-            try:
-                old_helper.unlink()
-            except OSError:
-                pass
+    for pattern in (f"{UPDATE_HELPER_BASENAME}-v*", f"{LEGACY_UPDATE_HELPER_BASENAME}-v*"):
+        for old_helper in updates_directory.glob(pattern):
+            if old_helper != helper_copy:
+                try:
+                    old_helper.unlink()
+                except OSError:
+                    pass
     try:
         shutil.copy2(helper, helper_copy)
         if installation.platform_key == "linux-x64":

@@ -16,6 +16,17 @@ from src.config import (
     UPDATE_INSTALLER_ICON_IMAGE_PATH,
     UPDATE_INSTALLER_ICON_PATH,
     UPDATE_INSTALLER_ICON_PREVIEW_PATH,
+    YUGEN_CONCERT_PLACEHOLDER_PATH,
+    YUGEN_DETAILS_DECORATION_PATH,
+    YUGEN_DOWNLOAD_BUTTON_PATH,
+    YUGEN_EMBLEM_PATH,
+    YUGEN_HEADER_EQUALIZER_PATH,
+    YUGEN_HERO_BANNER_PATH,
+    YUGEN_PLAQUE_PATH,
+    YUGEN_PROGRESS_BRUSH_PATH,
+    YUGEN_SIDEBAR_WAVES_PATH,
+    YUGEN_WINDOW_ICON_PATH,
+    YUGEN_WINDOW_ICON_PREVIEW_PATH,
     ConfigurationError,
     prepare_environment,
     prepare_output_directory,
@@ -37,6 +48,21 @@ class ConfigurationTests(unittest.TestCase):
         self.assertTrue(UPDATE_INSTALLER_ICON_PATH.is_file())
         self.assertTrue(TYPOGRAPHY_REFERENCE_IMAGE_PATH.is_file())
         self.assertTrue(INTERFACE_REFERENCE_IMAGE_PATH.is_file())
+        self.assertEqual(YUGEN_WINDOW_ICON_PATH.name, "yugen_audio.ico")
+        for yugen_asset in (
+            YUGEN_HERO_BANNER_PATH,
+            YUGEN_EMBLEM_PATH,
+            YUGEN_PLAQUE_PATH,
+            YUGEN_HEADER_EQUALIZER_PATH,
+            YUGEN_DOWNLOAD_BUTTON_PATH,
+            YUGEN_PROGRESS_BRUSH_PATH,
+            YUGEN_CONCERT_PLACEHOLDER_PATH,
+            YUGEN_DETAILS_DECORATION_PATH,
+            YUGEN_SIDEBAR_WAVES_PATH,
+            YUGEN_WINDOW_ICON_PATH,
+            YUGEN_WINDOW_ICON_PREVIEW_PATH,
+        ):
+            self.assertTrue(yugen_asset.is_file(), yugen_asset)
 
     def test_creates_missing_output_directory(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

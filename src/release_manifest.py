@@ -10,13 +10,18 @@ from pathlib import Path
 from src.config import APP_VERSION
 
 
+RELEASE_PACKAGE_NAME = "YugenAudio"
 PLATFORM_ARTIFACTS = {
     "windows-x64": (
-        "KenjiMusicDownloader-v{version}-Windows-x64.zip",
+        (f"{RELEASE_PACKAGE_NAME}-v{{version}}-Windows-x64.zip",),
         "update-windows.json",
     ),
     "linux-x64": (
-        "KenjiMusicDownloader-v{version}-Linux-x64.tar.gz",
+        (
+            f"{RELEASE_PACKAGE_NAME}-v{{version}}-Linux-x64.AppImage",
+            f"{RELEASE_PACKAGE_NAME}-v{{version}}-Linux-x64.tar.gz",
+            f"{RELEASE_PACKAGE_NAME}-v{{version}}-Linux-x64.zip",
+        ),
         "update-linux.json",
     ),
 }
@@ -53,6 +58,19 @@ def _write_json(path: Path, payload: dict) -> None:
     temporary.replace(path)
 
 
+def _select_platform_asset(
+    dist: Path,
+    artifact_templates: tuple[str, ...],
+    version: str,
+) -> tuple[str, Path] | None:
+    for asset_template in artifact_templates:
+        asset_name = asset_template.format(version=version)
+        asset_path = dist / asset_name
+        if asset_path.is_file() and not asset_path.is_symlink():
+            return asset_name, asset_path
+    return None
+
+
 def generate_release_manifests(
     dist_directory: Path,
     version: str = APP_VERSION,
@@ -62,21 +80,22 @@ def generate_release_manifests(
     if not dist.is_dir():
         raise ReleaseManifestError(f"No existe la carpeta de paquetes: {dist}")
 
-    notes = f"Actualización de Kenji Music Downloader v{version}"
+    notes = f"Actualización de Yūgen Audio v{version}"
     assets: dict[str, dict[str, str]] = {}
     generated: list[GeneratedManifest] = []
 
-    for platform_key, (asset_template, manifest_name) in PLATFORM_ARTIFACTS.items():
-        asset_name = asset_template.format(version=version)
-        asset_path = dist / asset_name
+    for platform_key, (artifact_templates, manifest_name) in PLATFORM_ARTIFACTS.items():
         manifest_path = dist / manifest_name
-        if not asset_path.is_file() or asset_path.is_symlink():
+        selected_asset = _select_platform_asset(dist, artifact_templates, version)
+        if selected_asset is None:
             manifest_path.unlink(missing_ok=True)
             continue
+        asset_name, asset_path = selected_asset
 
         asset_data = {
             "name": asset_name,
             "sha256": calculate_sha256(asset_path),
+            "size": asset_path.stat().st_size,
         }
         assets[platform_key] = asset_data
         _write_json(
@@ -92,7 +111,7 @@ def generate_release_manifests(
 
     if not assets:
         raise ReleaseManifestError(
-            f"No se encontraron paquetes de Kenji Music Downloader v{version} en {dist}."
+            f"No se encontraron paquetes de Yūgen Audio v{version} en {dist}."
         )
 
     combined_path = dist / COMBINED_MANIFEST_NAME

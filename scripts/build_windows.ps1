@@ -14,6 +14,7 @@ if ([string]::IsNullOrWhiteSpace($PythonExecutable)) {
 $SpecFile = Join-Path $ProjectRoot "kenji-music-downloader.spec"
 $BuildDirectory = Join-Path $ProjectRoot "build"
 $DistDirectory = Join-Path $ProjectRoot "dist"
+$ReleaseDirectory = Join-Path $ProjectRoot "release\windows"
 
 function Remove-SafeBuildDirectory {
     param([Parameter(Mandatory = $true)][string]$TargetPath)
@@ -70,6 +71,77 @@ function Compress-ArchiveWithRetry {
     }
 }
 
+function Resolve-BuildToolExecutable {
+    param([Parameter(Mandatory = $true)][string]$ToolName)
+
+    $PreferredDirectory = [Environment]::GetEnvironmentVariable("YUGEN_FFMPEG_DIR")
+    if (-not [string]::IsNullOrWhiteSpace($PreferredDirectory)) {
+        foreach ($CandidateName in @("$ToolName.exe", $ToolName)) {
+            $CandidatePath = Join-Path $PreferredDirectory $CandidateName
+            if (Test-Path -LiteralPath $CandidatePath -PathType Leaf) {
+                return (Resolve-Path -LiteralPath $CandidatePath).Path
+            }
+        }
+    }
+
+    foreach ($CandidateName in @("$ToolName.exe", $ToolName)) {
+        $Command = Get-Command $CandidateName -CommandType Application -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($null -ne $Command) {
+            return $Command.Source
+        }
+    }
+
+    throw (
+        "No se encontró {0}. Instala FFmpeg o define YUGEN_FFMPEG_DIR con ffmpeg.exe y ffprobe.exe." -f
+        $ToolName
+    )
+}
+
+function Copy-RequiredFfmpegTools {
+    param([Parameter(Mandatory = $true)][string]$DestinationDirectory)
+
+    New-Item -ItemType Directory -Path $DestinationDirectory -Force | Out-Null
+    foreach ($ToolName in @("ffmpeg", "ffprobe")) {
+        $SourcePath = Resolve-BuildToolExecutable -ToolName $ToolName
+        $DestinationPath = Join-Path $DestinationDirectory "$ToolName.exe"
+        Copy-Item -LiteralPath $SourcePath -Destination $DestinationPath -Force
+        if (-not (Test-Path -LiteralPath $DestinationPath -PathType Leaf)) {
+            throw "No se pudo copiar $ToolName a $DestinationPath"
+        }
+        Write-Host "Herramienta incluida: $DestinationPath"
+        Copy-OptionalFfmpegNotices -SourcePath $SourcePath -DestinationDirectory $DestinationDirectory
+    }
+}
+
+function Copy-OptionalFfmpegNotices {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$DestinationDirectory
+    )
+
+    $BinaryDirectory = Split-Path -Parent $SourcePath
+    $CandidateDirectories = @(
+        $BinaryDirectory,
+        (Split-Path -Parent $BinaryDirectory)
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($Directory in $CandidateDirectories) {
+        foreach ($NoticeName in @("LICENSE", "COPYING", "README.txt")) {
+            $NoticePath = Join-Path $Directory $NoticeName
+            if (-not (Test-Path -LiteralPath $NoticePath -PathType Leaf)) {
+                continue
+            }
+            $DestinationName = "FFmpeg-{0}.txt" -f [System.IO.Path]::GetFileNameWithoutExtension($NoticeName)
+            $DestinationPath = Join-Path $DestinationDirectory $DestinationName
+            if (-not (Test-Path -LiteralPath $DestinationPath -PathType Leaf)) {
+                Copy-Item -LiteralPath $NoticePath -Destination $DestinationPath -Force
+                Write-Host "Aviso de FFmpeg incluido: $DestinationPath"
+            }
+        }
+    }
+}
+
 if (-not (Test-Path -LiteralPath $PythonExecutable)) {
     throw "No se encontró el entorno virtual: $PythonExecutable"
 }
@@ -95,29 +167,33 @@ try {
     # Limpia solo artefactos Windows; conserva un TAR.GZ Linux ya copiado a dist.
     Get-ChildItem -LiteralPath $DistDirectory -File | Where-Object {
         $_.Name -in @(
-            "KenjiMusicDownloader.exe",
-            "KenjiUpdateInstaller.exe",
+            "YugenAudio.exe",
+            "YugenAudioUpdateInstaller.exe",
             "update-windows.json",
             "update.json"
-        ) -or $_.Name -like "KenjiMusicDownloader-v*-Windows-x64.zip"
+        ) -or $_.Name -like "YugenAudio-v*-Windows-x64.zip" -or $_.Name -like "KenjiMusicDownloader-v*-Windows-x64.zip"
     } | Remove-Item -Force
     Get-ChildItem -LiteralPath $DistDirectory -Directory | Where-Object {
+        $_.Name -eq "KenjiMusicDownloader" -or
+        $_.Name -like "YugenAudio-v*-Windows-x64" -or
         $_.Name -like "KenjiMusicDownloader-v*-Windows-x64"
     } | ForEach-Object {
         Remove-SafeBuildDirectory -TargetPath $_.FullName
     }
-    $OnedirOutput = Join-Path $DistDirectory "KenjiMusicDownloader"
+    $OnedirOutput = Join-Path $DistDirectory "YugenAudio"
     if (Test-Path -LiteralPath $OnedirOutput) {
         Remove-SafeBuildDirectory -TargetPath $OnedirOutput
     }
+    Remove-SafeBuildDirectory -TargetPath $ReleaseDirectory
+    New-Item -ItemType Directory -Path $ReleaseDirectory | Out-Null
 
     & $PythonExecutable -m PyInstaller --clean --noconfirm $SpecFile
     if ($LASTEXITCODE -ne 0) {
         throw "PyInstaller terminó con código $LASTEXITCODE."
     }
 
-    $ExecutablePath = Join-Path $OnedirOutput "KenjiMusicDownloader.exe"
-    $UpdaterPath = Join-Path $OnedirOutput "KenjiUpdateInstaller.exe"
+    $ExecutablePath = Join-Path $OnedirOutput "YugenAudio.exe"
+    $UpdaterPath = Join-Path $OnedirOutput "YugenAudioUpdateInstaller.exe"
     if (-not (Test-Path -LiteralPath $ExecutablePath)) {
         throw "No se generó el ejecutable esperado: $ExecutablePath"
     }
@@ -126,8 +202,9 @@ try {
     }
     Copy-Item -LiteralPath (Join-Path $ProjectRoot "README.md") `
         -Destination (Join-Path $OnedirOutput "README.md") -Force
+    Copy-RequiredFfmpegTools -DestinationDirectory (Join-Path $OnedirOutput "tools")
 
-    $ZipPath = Join-Path $DistDirectory "KenjiMusicDownloader-v$Version-Windows-x64.zip"
+    $ZipPath = Join-Path $DistDirectory "YugenAudio-v$Version-Windows-x64.zip"
     Compress-ArchiveWithRetry -SourcePath $OnedirOutput -DestinationPath $ZipPath
 
     & $PythonExecutable scripts\generate_update_manifest.py
@@ -136,6 +213,11 @@ try {
     }
     $PlatformManifestPath = Join-Path $DistDirectory "update-windows.json"
     $CombinedManifestPath = Join-Path $DistDirectory "update.json"
+    Copy-Item -LiteralPath $ZipPath -Destination $ReleaseDirectory -Force
+    Copy-Item -LiteralPath $PlatformManifestPath -Destination $ReleaseDirectory -Force
+    if (Test-Path -LiteralPath $CombinedManifestPath) {
+        Copy-Item -LiteralPath $CombinedManifestPath -Destination $ReleaseDirectory -Force
+    }
 
     Write-Host ""
     Write-Host "Empaquetado completado correctamente."
@@ -143,6 +225,7 @@ try {
     Write-Host "Helper: $UpdaterPath"
     Write-Host "Paquete para GitHub Releases: $ZipPath"
     Write-Host "Manifest Windows: $PlatformManifestPath"
+    Write-Host "Release Windows: $ReleaseDirectory"
     if (Test-Path -LiteralPath $CombinedManifestPath) {
         Write-Host "Manifest combinado: $CombinedManifestPath"
     }

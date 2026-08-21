@@ -1,11 +1,11 @@
-﻿# Kenji Music Downloader
+# Yūgen Audio
 
 AplicaciÃ³n de escritorio para descargar el audio de un video individual de
 YouTube y convertirlo al formato elegido. EstÃ¡ escrita en Python, ofrece una
 interfaz grÃ¡fica con Tkinter, usa la API de `yt-dlp` y delega la conversiÃ³n a
 FFmpeg.
 
-VersiÃ³n actual: **v1.0.7**.
+Latest version: v1.0.8.
 
 > Usa esta herramienta Ãºnicamente con contenido propio o cuando tengas permiso
 > para descargarlo. Respeta los derechos de autor y los tÃ©rminos aplicables.
@@ -44,9 +44,11 @@ VersiÃ³n actual: **v1.0.7**.
 - `yt-dlp-ejs` y Deno, instalados automÃ¡ticamente mediante `requirements.txt`.
 - ConexiÃ³n a Internet durante las descargas.
 
-El ejecutable de Windows incluye Python, `yt-dlp` y Deno; el usuario no
-necesita instalar Python. Si FFmpeg o FFprobe faltan, la propia aplicaciÃ³n
-puede descargarlos e instalarlos para ese usuario.
+El paquete oficial de Windows incluye Python, `yt-dlp`, Deno, FFmpeg y FFprobe;
+el usuario no necesita instalar Python ni herramientas externas manualmente.
+En Linux, los paquetes deben generarse nativamente con el script del proyecto;
+cuando FFmpeg/FFprobe se empaquetan, la app los usa desde `tools/`, y si faltan
+muestra un diagnÃ³stico claro para instalar la dependencia del sistema.
 
 ## Identidad visual y assets
 
@@ -56,23 +58,50 @@ Los recursos visuales oficiales viven en `assets/`:
 assets/logo_main.png
 assets/logo_main_header.png
 assets/logo_main_icon.png
-assets/logo_main.ico
+assets/yugen/yugen_audio.ico
 assets/updater_logo.png
 assets/updater_logo_icon.png
 assets/updater_logo.ico
 assets/typography_reference.png
 assets/interface_reference_new.png
+assets/yugen/hero_banner.png
+assets/yugen/yugen_emblem.png
+assets/yugen/japanese_plaque.png
+assets/yugen/header_equalizer.png
+assets/yugen/download_button.png
+assets/yugen/progress_brush.png
+assets/yugen/concert_placeholder.png
+assets/yugen/details_decoration.png
+assets/yugen/sidebar_waves.png
+assets/yugen/interface_reference.png
+assets/yugen/yugen_audio.ico
 ```
 
-- `assets/logo_main.png`: logo principal de Kenji Music Downloader.
+- `assets/logo_main.png`: logo principal de Yūgen Audio.
 - `assets/logo_main_header.png`: versiÃ³n optimizada que se muestra en el encabezado.
 - `assets/logo_main_icon.png`: versiÃ³n PNG cuadrada para icono de ventana en Linux.
-- `assets/logo_main.ico`: icono principal de `KenjiMusicDownloader.exe`.
+- `assets/yugen/yugen_audio.ico`: icono principal de `YugenAudio.exe`.
 - `assets/updater_logo.png`: logo exclusivo del actualizador.
 - `assets/updater_logo_icon.png`: vista previa PNG del icono del actualizador.
-- `assets/updater_logo.ico`: icono de `KenjiUpdateInstaller.exe`.
+- `assets/updater_logo.ico`: icono de `YugenAudioUpdateInstaller.exe`.
 - `assets/typography_reference.png`: referencia de estilo tipogrÃ¡fico.
 - `assets/interface_reference_new.png`: referencia visual del diseÃ±o oscuro/neÃ³n.
+
+
+
+Assets nuevos de Y?gen usados por la interfaz:
+
+- `assets/yugen/hero_banner.png`: banner superior con cantante, luna y olas.
+- `assets/yugen/yugen_emblem.png`: emblema circular ???? del encabezado.
+- `assets/yugen/japanese_plaque.png`: placa vertical ????????.
+- `assets/yugen/header_equalizer.png`: l?nea decorativa del encabezado.
+- `assets/yugen/download_button.png`: icono del bot?n principal de descarga.
+- `assets/yugen/progress_brush.png`: textura azul para el progreso completado.
+- `assets/yugen/concert_placeholder.png`: miniatura provisional de detalles.
+- `assets/yugen/details_decoration.png`: decoraci?n lateral de detalles.
+- `assets/yugen/sidebar_waves.png`: decoraci?n inferior de la barra lateral.
+- `assets/yugen/interface_reference.png`: referencia visual completa, no usada como fondo.
+- `assets/yugen/yugen_audio.ico`: icono principal de `YugenAudio.exe`.
 
 La interfaz intenta usar **Rajdhani** para tÃ­tulos y secciones. Si esa fuente no
 estÃ¡ instalada, usa alternativas seguras y modernas como **Bahnschrift**,
@@ -131,8 +160,13 @@ FFmpeg manualmente y dejar `ffmpeg` y `ffprobe` disponibles en el `PATH`.
 Las versiones publicadas se distribuyen desde
 [GitHub Releases](https://github.com/KENJIOFC/kenji-music-downloader/releases).
 Para Windows, descarga el archivo con nombre similar a
-`KenjiMusicDownloader-v1.0.7-Windows-x64.zip`, extrÃ¡elo y ejecuta
-`KenjiMusicDownloader.exe`.
+`YugenAudio-v1.0.8-Windows-x64.zip`, extrÃ¡elo y ejecuta
+`YugenAudio.exe`.
+
+Para Linux, usa Ãºnicamente paquetes generados y probados nativamente en Linux.
+El formato principal previsto es `YugenAudio-v1.0.8-Linux-x64.AppImage`; si se
+publica, dale permiso de ejecuciÃ³n con `chmod +x` y Ã¡brelo directamente. El
+TAR.GZ y el paquete DEB son formatos auxiliares del mismo flujo de build.
 
 Esta distribuciÃ³n no estÃ¡ firmada digitalmente. Windows SmartScreen, Smart App
 Control o una polÃ­tica corporativa pueden mostrar una advertencia o bloquear
@@ -160,7 +194,7 @@ tema y preferencia de bÃºsqueda de actualizaciones en un archivo JSON del
 perfil del usuario:
 
 - Windows: `%APPDATA%\KenjiMusicDownloader\settings.json`
-- Linux: `~/.config/kenji-music-downloader/settings.json` o la ruta indicada por
+- Linux: `~/.config/yugen-audio/settings.json` o la ruta indicada por
   `XDG_CONFIG_HOME`.
 
 El botÃ³n **Limpiar** no modifica estas preferencias ni borra archivos. El botÃ³n
@@ -211,7 +245,7 @@ El flujo automÃ¡tico:
 3. descarga bajo `%APPDATA%\KenjiMusicDownloader\updates\` en Windows o
    `~/.local/share/KenjiMusicDownloader/updates/` en Linux;
 4. calcula SHA-256 y cancela la instalaciÃ³n si no coincide;
-5. copia y ejecuta `KenjiUpdateInstaller` sin `shell=True` ni terminal visible;
+5. copia y ejecuta `YugenAudioUpdateInstaller` sin `shell=True` ni terminal visible;
 6. cierra la app, crea backup, reemplaza archivos y la vuelve a abrir;
 7. restaura el backup si la sustituciÃ³n o el reinicio falla.
 
@@ -222,10 +256,10 @@ descargas no forman parte del payload y se conservan. La app no modifica el
 Los nombres reconocidos son:
 
 ```text
-KenjiMusicDownloader-vX.X.X-Windows-x64.zip
-KenjiMusicDownloader-vX.X.X-Linux-x64.AppImage
-KenjiMusicDownloader-vX.X.X-Linux-x64.tar.gz
-KenjiMusicDownloader-vX.X.X-Linux-x64.zip
+YugenAudio-vX.X.X-Windows-x64.zip
+YugenAudio-vX.X.X-Linux-x64.AppImage
+YugenAudio-vX.X.X-Linux-x64.tar.gz
+YugenAudio-vX.X.X-Linux-x64.zip
 ```
 
 En Linux se prefiere AppImage, despuÃ©s TAR.GZ y finalmente ZIP. Si la carpeta
@@ -241,15 +275,17 @@ SHA-256. Debe subirse como asset de la misma release:
 
 ```json
 {
-  "version": "1.0.7",
+  "version": "1.0.8",
   "assets": {
     "windows-x64": {
-      "name": "KenjiMusicDownloader-v1.0.7-Windows-x64.zip",
-      "sha256": "HASH_SHA256_WINDOWS"
+      "name": "YugenAudio-v1.0.8-Windows-x64.zip",
+      "sha256": "HASH_SHA256_WINDOWS",
+      "size": 0
     },
     "linux-x64": {
-      "name": "KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz",
-      "sha256": "HASH_SHA256_LINUX"
+      "name": "YugenAudio-v1.0.8-Linux-x64.AppImage",
+      "sha256": "HASH_SHA256_LINUX",
+      "size": 0
     }
   },
   "notes": "Notas breves de la actualizaciÃ³n"
@@ -272,7 +308,7 @@ se limitan a los assets del repositorio oficial y ZIP/TAR rechazan path
 traversal y enlaces simbÃ³licos.
 
 La versiÃ³n `v1.0.4` introduce el helper. Una instalaciÃ³n anterior que todavÃ­a
-no incluya `KenjiUpdateInstaller` necesita actualizarse manualmente una sola vez
+no incluya `YugenAudioUpdateInstaller` necesita actualizarse manualmente una sola vez
 a `v1.0.4`; las versiones posteriores ya pueden usar el flujo completo.
 
 Al iniciar:
@@ -285,17 +321,17 @@ Para que la detecciÃ³n funcione debe existir al menos una release publicada en
 GitHub. Si todavÃ­a no hay releases, la bÃºsqueda manual muestra una explicaciÃ³n
 clara. Para probar el flujo:
 
-1. publica una release con tag `v1.0.7` y comprueba que la app indique que estÃ¡
+1. publica una release con tag `v1.0.8` y comprueba que la app indique que estÃ¡
    actualizada;
 2. publica despuÃ©s una release de prueba con una versiÃ³n superior, como
-   `v1.0.7`;
+   `v1.0.9`;
 3. vuelve a buscar y la app ofrecerÃ¡ descargar e instalar el paquete correcto.
 
 ### DiagnÃ³stico seguro del actualizador
 
 El mÃ³dulo `src.update_diagnostics` prueba el mismo manifest, descarga, SHA-256 y
 extractor usados por la actualizaciÃ³n real, pero trabaja Ãºnicamente dentro de
-una carpeta temporal. No inicia `KenjiUpdateInstaller`, no cierra la aplicaciÃ³n
+una carpeta temporal. No inicia `YugenAudioUpdateInstaller`, no cierra la aplicaciÃ³n
 y no reemplaza archivos instalados.
 
 El comando documentado para dry-run es `python -m src.update_diagnostics`; el
@@ -305,15 +341,15 @@ por sÃ­ solo.
 Para probar automÃ¡ticamente el sistema actual contra la Ãºltima release:
 
 ```bash
-python -m src.update_diagnostics --dry-run --expect-version 1.0.7
+python -m src.update_diagnostics --dry-run --expect-version 1.0.8
 ```
 
 TambiÃ©n se puede comprobar explÃ­citamente la selecciÃ³n de cada asset desde una
 sola mÃ¡quina:
 
 ```bash
-python -m src.update_diagnostics --dry-run --platform windows --expect-version 1.0.7
-python -m src.update_diagnostics --dry-run --platform linux --expect-version 1.0.7
+python -m src.update_diagnostics --dry-run --platform windows --expect-version 1.0.8
+python -m src.update_diagnostics --dry-run --platform linux --expect-version 1.0.8
 ```
 
 El diagnÃ³stico exige que el Ãºnico `update.json` contenga entradas y SHA-256
@@ -358,7 +394,7 @@ Los datos locales se guardan junto a `settings.json`:
 En Windows, `settings.json` e `history.json` estÃ¡n en
 `%APPDATA%\KenjiMusicDownloader\`, y el log estÃ¡ en
 `%APPDATA%\KenjiMusicDownloader\logs\errors.log`. En Linux se usa
-`~/.config/kenji-music-downloader/` o `XDG_CONFIG_HOME`. El registro se puede
+`~/.config/yugen-audio/` o `XDG_CONFIG_HOME`. El registro se puede
 consultar desde **Ayuda > Ver registro de errores**. Si estÃ¡ vacÃ­o, la
 aplicaciÃ³n muestra `No hay errores registrados.`
 
@@ -389,7 +425,7 @@ Entra en la carpeta del proyecto (sustituye la ruta del ejemplo por la tuya) y
 crea un entorno virtual:
 
 ```powershell
-cd ruta\a\kenji-music-downloader
+cd ruta\a\yugen-audio
 py -3 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
@@ -426,8 +462,8 @@ Si PowerShell impide activar el entorno virtual, puedes ejecutar sin activarlo:
 PyInstaller debe ejecutarse en Windows para generar el `.exe`. El script de
 construcciÃ³n limpia `build/` y los artefactos Windows anteriores, conserva un
 paquete Linux presente en `dist`, ejecuta las pruebas, incluye `assets/`, aplica
-`assets/logo_main.ico` como icono de `KenjiMusicDownloader.exe`, aplica
-`assets/updater_logo.ico` como icono de `KenjiUpdateInstaller.exe` y
+`assets/yugen/yugen_audio.ico` como icono de `YugenAudio.exe`, aplica
+`assets/updater_logo.ico` como icono de `YugenAudioUpdateInstaller.exe` y
 crea el ZIP:
 
 ```powershell
@@ -437,11 +473,15 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build_windows.ps1
 Resultados:
 
 ```text
-dist\KenjiMusicDownloader\KenjiMusicDownloader.exe
-dist\KenjiMusicDownloader\KenjiUpdateInstaller.exe
-dist\KenjiMusicDownloader\_internal\
-dist\KenjiMusicDownloader-v1.0.7-Windows-x64.zip
+dist\YugenAudio\YugenAudio.exe
+dist\YugenAudio\YugenAudioUpdateInstaller.exe
+dist\YugenAudio\tools\ffmpeg.exe
+dist\YugenAudio\tools\ffprobe.exe
+dist\YugenAudio\_internal\
+dist\YugenAudio-v1.0.8-Windows-x64.zip
 dist\update-windows.json
+release\windows\YugenAudio-v1.0.8-Windows-x64.zip
+release\windows\update-windows.json
 dist\update.json (solo si tambiÃ©n estÃ¡ presente el paquete Linux)
 ```
 
@@ -457,8 +497,8 @@ mÃ¡s transparente para antivirus que un ejecutable Ãºnico empaquetado. Si qu
 probar comandos directos sin el `.spec`, usa tambiÃ©n `--onedir`:
 
 ```powershell
-.\.venv\Scripts\python.exe -m PyInstaller --onedir --windowed --name KenjiMusicDownloader --icon assets\logo_main.ico --add-data "assets;assets" src\gui.py
-.\.venv\Scripts\python.exe -m PyInstaller --onedir --windowed --name KenjiUpdateInstaller --icon assets\updater_logo.ico src\update_installer.py
+.\.venv\Scripts\python.exe -m PyInstaller --onedir --windowed --name YugenAudio --icon assets\yugen\yugen_audio.ico --add-data "assets;assets" src\gui.py
+.\.venv\Scripts\python.exe -m PyInstaller --onedir --windowed --name YugenAudioUpdateInstaller --icon assets\updater_logo.ico src\update_installer.py
 ```
 
 Los ejecutables no abren consola negra y no dependen de la carpeta de desarrollo
@@ -468,7 +508,7 @@ si falta, puede instalarse desde la propia app.
 
 El build excluye archivos de desarrollo como tests, cachÃ©s, backups, `.git`,
 entornos virtuales, descargas y temporales. El actualizador solo lanza
-`KenjiUpdateInstaller` despuÃ©s de una confirmaciÃ³n visible del usuario y descarga
+`YugenAudioUpdateInstaller` despuÃ©s de una confirmaciÃ³n visible del usuario y descarga
 assets desde GitHub Releases del repositorio oficial usando el manifest publicado.
 El `.spec` desactiva UPX, usa `onedir` y no solicita permisos de administrador.
 
@@ -481,17 +521,17 @@ modifica el `PATH` del sistema y no intenta evadir controles de seguridad.
 
 Smart App Control puede bloquear la app aunque VirusTotal sea mayormente limpio
 si Windows no puede comprobar el publicador. La soluciÃ³n correcta para reducir
-ese bloqueo en distribuciÃ³n pÃºblica es firmar `KenjiMusicDownloader.exe` y
-`KenjiUpdateInstaller.exe` con un certificado de firma de cÃ³digo y publicar los
+ese bloqueo en distribuciÃ³n pÃºblica es firmar `YugenAudio.exe` y
+`YugenAudioUpdateInstaller.exe` con un certificado de firma de cÃ³digo y publicar los
 hashes SHA-256 de cada release.
 
 Errores comunes de assets o icono:
 
 - Si la ventana abre sin logotipo, verifica que exista `assets/logo_main_header.png`.
-- Si `KenjiMusicDownloader.exe` queda con icono genÃ©rico, confirma que exista
-  `assets/logo_main.ico` antes de ejecutar PyInstaller y reconstruye desde cero
+- Si `YugenAudio.exe` queda con icono genÃ©rico, confirma que exista
+  `assets/yugen/yugen_audio.ico` antes de ejecutar PyInstaller y reconstruye desde cero
   con el `.spec`.
-- Si `KenjiUpdateInstaller.exe` muestra el mismo icono de la app principal,
+- Si `YugenAudioUpdateInstaller.exe` muestra el mismo icono de la app principal,
   confirma que el `.spec` apunte a `assets/updater_logo.ico`.
 - Si Windows sigue mostrando un icono viejo aunque el `.spec` estÃ© correcto,
   puede ser cachÃ© del Explorador. Prueba renombrar el `.exe`, reconstruir en una
@@ -531,17 +571,23 @@ construcciÃ³n usa el archivo `kenji-music-downloader.spec` e incluye la carpet
 
 ```bash
 bash scripts/build_linux.sh
-./dist/KenjiMusicDownloader
+./dist/YugenAudio
 ```
 
 Resultados publicables:
 
 ```text
-dist/KenjiMusicDownloader/KenjiMusicDownloader
-dist/KenjiMusicDownloader/KenjiUpdateInstaller
-dist/KenjiMusicDownloader/_internal/
-dist/KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz
+dist/YugenAudio/YugenAudio
+dist/YugenAudio/YugenAudioUpdateInstaller
+dist/YugenAudio/tools/ffmpeg
+dist/YugenAudio/tools/ffprobe
+dist/YugenAudio/_internal/
+dist/YugenAudio-v1.0.8-Linux-x64.AppImage
+dist/YugenAudio-v1.0.8-Linux-x64.tar.gz
+dist/yugen-audio_1.0.8_amd64.deb
 dist/update-linux.json
+release/linux/YugenAudio-v1.0.8-Linux-x64.AppImage
+release/linux/YugenAudio-v1.0.8-Linux-x64.tar.gz
 dist/update.json (solo si tambiÃ©n estÃ¡ presente el paquete Windows)
 ```
 
@@ -555,13 +601,15 @@ mkdir -p dist/downloads
 Un comando directo mÃ­nimo para Linux serÃ­a:
 
 ```bash
-python -m PyInstaller --onedir --name KenjiMusicDownloader --add-data "assets:assets" src/gui.py
+python -m PyInstaller --onedir --name YugenAudio --add-data "assets:assets" src/gui.py
 ```
 
-Los ejecutables se crean dentro de la carpeta `dist/KenjiMusicDownloader/`.
-FFmpeg continÃºa siendo una dependencia del sistema: debe estar instalado en la
-laptop Linux. El ejecutable abre la interfaz grÃ¡fica sin una consola adicional.
-La carpeta predeterminada serÃ¡ `dist/KenjiMusicDownloader/downloads`, pero puede
+Los ejecutables se crean dentro de la carpeta `dist/YugenAudio/`.
+El script copia `ffmpeg` y `ffprobe` dentro del paquete si los encuentra en
+`PATH` o en `YUGEN_FFMPEG_DIR`. Si no se incluyen, la app los detecta como
+dependencia del sistema y muestra el diagnostico correspondiente.
+El ejecutable abre la interfaz grÃ¡fica sin una consola adicional.
+La carpeta predeterminada serÃ¡ `dist/YugenAudio/downloads`, pero puede
 cambiarse desde la ventana.
 
 Errores comunes de assets o icono en Linux:
@@ -575,9 +623,9 @@ Errores comunes de assets o icono en Linux:
 Para distribuirlo manualmente, copia a la misma carpeta:
 
 ```text
-KenjiMusicDownloader/
-â”œâ”€â”€ KenjiMusicDownloader
-â”œâ”€â”€ KenjiUpdateInstaller
+YugenAudio/
+â”œâ”€â”€ YugenAudio
+â”œâ”€â”€ YugenAudioUpdateInstaller
 â”œâ”€â”€ _internal/
 â””â”€â”€ README.md
 ```
@@ -585,9 +633,9 @@ KenjiMusicDownloader/
 Si hace falta restaurar el permiso de ejecuciÃ³n:
 
 ```bash
-chmod +x KenjiMusicDownloader/KenjiMusicDownloader
-chmod +x KenjiMusicDownloader/KenjiUpdateInstaller
-./KenjiMusicDownloader/KenjiMusicDownloader
+chmod +x YugenAudio/YugenAudio
+chmod +x YugenAudio/YugenAudioUpdateInstaller
+./YugenAudio/YugenAudio
 ```
 
 ## PublicaciÃ³n multiplataforma
@@ -614,12 +662,18 @@ dist/update-linux.json
 dist/update.json
 ```
 
-Para GitHub Release `v1.0.7`, sube obligatoriamente:
+Para GitHub Release `v1.0.8`, sube los artefactos verificados de cada
+plataforma. Windows puede publicarse con su manifest especÃ­fico aunque Linux
+todavÃ­a estÃ© pendiente de build nativo. Cuando Windows y Linux estÃ©n juntos y
+verificados, sube tambiÃ©n `update.json` combinado.
 
 ```text
-KenjiMusicDownloader-v1.0.7-Windows-x64.zip
-KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz
-update.json
+YugenAudio-v1.0.8-Windows-x64.zip
+update-windows.json
+YugenAudio-v1.0.8-Linux-x64.AppImage (solo despuÃ©s de build/prueba en Linux)
+YugenAudio-v1.0.8-Linux-x64.tar.gz (solo despuÃ©s de build/prueba en Linux)
+update-linux.json (solo despuÃ©s de build/prueba en Linux)
+update.json (solo cuando ambas plataformas verificadas estÃ©n presentes)
 ```
 
 Los manifests especÃ­ficos son auxiliares y opcionales en la release. No edites
@@ -704,7 +758,7 @@ suben a Git.
 ## Estructura
 
 ```text
-kenji-music-downloader/
+yugen-audio/
 â”œâ”€â”€ src/
 â”‚   â”œâ”€â”€ __init__.py
 â”‚   â”œâ”€â”€ gui.py

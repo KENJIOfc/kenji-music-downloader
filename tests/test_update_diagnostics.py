@@ -21,10 +21,10 @@ from src.updates import ReleaseAsset, UpdateResult
 
 RELEASE_PREFIX = (
     "https://github.com/KENJIOFC/kenji-music-downloader/"
-    "releases/download/v1.0.7/"
+    "releases/download/v1.0.8/"
 )
-WINDOWS_NAME = "KenjiMusicDownloader-v1.0.7-Windows-x64.zip"
-LINUX_NAME = "KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz"
+WINDOWS_NAME = "YugenAudio-v1.0.8-Windows-x64.zip"
+LINUX_NAME = "YugenAudio-v1.0.8-Linux-x64.tar.gz"
 
 
 class FakeResponse(BytesIO):
@@ -41,8 +41,8 @@ def make_result() -> UpdateResult:
     return UpdateResult(
         success=True,
         update_available=False,
-        current_version="1.0.7",
-        latest_version="1.0.7",
+        current_version="1.0.8",
+        latest_version="1.0.8",
         assets=(
             make_asset(WINDOWS_NAME),
             make_asset(LINUX_NAME),
@@ -53,7 +53,7 @@ def make_result() -> UpdateResult:
 
 def make_manifest(windows_hash: str, linux_hash: str) -> dict:
     return {
-        "version": "1.0.7",
+        "version": "1.0.8",
         "assets": {
             "windows-x64": {"name": WINDOWS_NAME, "sha256": windows_hash},
             "linux-x64": {"name": LINUX_NAME, "sha256": linux_hash},
@@ -64,8 +64,8 @@ def make_manifest(windows_hash: str, linux_hash: str) -> dict:
 def make_windows_zip() -> bytes:
     output = BytesIO()
     with ZipFile(output, "w") as archive:
-        archive.writestr("KenjiMusicDownloader.exe", b"main-windows")
-        archive.writestr("KenjiUpdateInstaller.exe", b"helper-windows")
+        archive.writestr("YugenAudio.exe", b"main-windows")
+        archive.writestr("YugenAudioUpdateInstaller.exe", b"helper-windows")
         archive.writestr("README.md", b"readme")
     return output.getvalue()
 
@@ -74,8 +74,8 @@ def make_linux_tar() -> bytes:
     output = BytesIO()
     with tarfile.open(fileobj=output, mode="w:gz") as archive:
         for name, content in (
-            ("KenjiMusicDownloader", b"main-linux"),
-            ("KenjiUpdateInstaller", b"helper-linux"),
+            ("YugenAudio", b"main-linux"),
+            ("YugenAudioUpdateInstaller", b"helper-linux"),
             ("README.md", b"readme"),
         ):
             member = tarfile.TarInfo(name)
@@ -149,7 +149,7 @@ class UpdateDiagnosticsTests(unittest.TestCase):
         archive = make_windows_zip()
         expected_hash = hashlib.sha256(archive).hexdigest()
         manifest = {
-            "version": "1.0.7",
+            "version": "1.0.8",
             "platform": "windows-x64",
             "asset": {"name": WINDOWS_NAME, "sha256": expected_hash},
             "notes": "Fallback Windows",
@@ -157,8 +157,8 @@ class UpdateDiagnosticsTests(unittest.TestCase):
         release = UpdateResult(
             success=True,
             update_available=False,
-            current_version="1.0.7",
-            latest_version="1.0.7",
+            current_version="1.0.8",
+            latest_version="1.0.8",
             assets=(
                 make_asset(WINDOWS_NAME),
                 make_asset("update-windows.json"),
@@ -198,8 +198,8 @@ class UpdateDiagnosticsTests(unittest.TestCase):
             )
         self.assertEqual(result.platform_key, "linux-x64")
         self.assertEqual(result.asset_name, LINUX_NAME)
-        self.assertIn("KenjiMusicDownloader", result.extracted_files)
-        self.assertIn("KenjiUpdateInstaller", result.extracted_files)
+        self.assertIn("YugenAudio", result.extracted_files)
+        self.assertIn("YugenAudioUpdateInstaller", result.extracted_files)
 
     def test_dry_run_rejects_hash_mismatch_before_extraction(self) -> None:
         archive = make_windows_zip()

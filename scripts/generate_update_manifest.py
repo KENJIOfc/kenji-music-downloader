@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 import sys
 
@@ -32,10 +33,42 @@ def _parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _configure_console_encoding() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except AttributeError:
+            pass
+
+
+def _asset_names_from_manifest(path: Path) -> dict[str, str]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        return {}
+
+    assets = payload.get("assets")
+    if isinstance(assets, dict):
+        return {
+            platform_key: asset["name"]
+            for platform_key, asset in assets.items()
+            if isinstance(asset, dict) and isinstance(asset.get("name"), str)
+        }
+
+    platform_key = payload.get("platform")
+    asset = payload.get("asset")
+    if isinstance(platform_key, str) and isinstance(asset, dict):
+        asset_name = asset.get("name")
+        if isinstance(asset_name, str):
+            return {platform_key: asset_name}
+    return {}
+
+
 def main(argv: list[str] | None = None) -> int:
+    _configure_console_encoding()
     arguments = _parse_arguments(argv)
+    dist = arguments.dist.resolve()
     try:
-        generated = generate_release_manifests(arguments.dist, APP_VERSION)
+        generated = generate_release_manifests(dist, APP_VERSION)
     except (ReleaseManifestError, OSError) as error:
         print(f"ERROR: {error}")
         return 1
@@ -43,12 +76,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Versión: {APP_VERSION}")
     for manifest in generated:
         print(f"Manifest creado: {manifest.path}")
-        for platform_key in manifest.platforms:
-            platform_data = (
-                "KenjiMusicDownloader-"
-                f"v{APP_VERSION}-{'Windows-x64.zip' if platform_key == 'windows-x64' else 'Linux-x64.tar.gz'}"
-            )
-            asset_path = arguments.dist.resolve() / platform_data
+        for platform_key, asset_name in _asset_names_from_manifest(manifest.path).items():
+            if platform_key not in manifest.platforms:
+                continue
+            asset_path = dist / asset_name
             print(f"  {platform_key}: {asset_path.name}")
             print(f"  SHA-256: {calculate_sha256(asset_path)}")
     return 0

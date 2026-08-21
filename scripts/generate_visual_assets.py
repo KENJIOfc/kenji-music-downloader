@@ -57,19 +57,25 @@ def _center_square(image, size: int, image_module):
     return canvas.resize((size, size), image_module.Resampling.LANCZOS)
 
 
-def _save_icon(source_name: str, png_name: str, ico_name: str | None, size: int) -> None:
+def _save_icon(
+    source_name: str,
+    png_name: str,
+    ico_name: str | None,
+    size: int,
+    assets_directory: Path = ASSETS_DIR,
+) -> None:
     Image = _load_pillow()
-    source = ASSETS_DIR / source_name
+    source = assets_directory / source_name
     image = Image.open(source).convert("RGBA")
     image = _transparent_checkerboard(image)
     icon = _center_square(image, size, Image)
 
-    png_path = ASSETS_DIR / png_name
+    png_path = assets_directory / png_name
     icon.save(png_path)
     print(f"PNG generado: {png_path.relative_to(PROJECT_ROOT)}")
 
     if ico_name:
-        ico_path = ASSETS_DIR / ico_name
+        ico_path = assets_directory / ico_name
         icon.save(ico_path, sizes=ICON_SIZES)
         print(f"ICO generado: {ico_path.relative_to(PROJECT_ROOT)}")
 
@@ -88,6 +94,17 @@ def main() -> None:
         "updater_logo.ico",
         256,
     )
+    yugen_directory = ASSETS_DIR / "yugen"
+    if yugen_directory.is_dir():
+        # Icono principal nuevo de Yūgen Audio. Se genera desde el emblema
+        # oficial sin sobrescribir los PNG originales del usuario.
+        _save_icon(
+            "yugen_emblem.png",
+            "yugen_audio_icon.png",
+            "yugen_audio.ico",
+            256,
+            yugen_directory,
+        )
 
 
 if __name__ == "__main__":

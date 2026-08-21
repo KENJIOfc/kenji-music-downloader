@@ -24,6 +24,16 @@ MAX_EXTRACTED_BYTES = 1_500 * 1024 * 1024
 COPY_CHUNK_BYTES = 1024 * 1024
 PARENT_EXIT_TIMEOUT_SECONDS = 90
 PYINSTALLER_INTERNAL_DIRECTORY = "_internal"
+TOOLS_DIRECTORY = "tools"
+ALLOWED_PACKAGED_TOOLS = {
+    "ffmpeg",
+    "ffmpeg.exe",
+    "ffprobe",
+    "ffprobe.exe",
+    "FFmpeg-LICENSE.txt",
+    "FFmpeg-COPYING.txt",
+    "FFmpeg-README.txt",
+}
 FORBIDDEN_PAYLOAD_PARTS = {
     ".git",
     ".venv",
@@ -213,12 +223,12 @@ def find_payload_root(extracted_directory: Path, main_name: str) -> Path:
 
 def validate_payload_files(payload_directory: Path, main_name: str) -> None:
     """Acepta la estructura onedir esperada sin fuentes, tests ni datos locales."""
-    helper_name = (
-        "KenjiUpdateInstaller.exe"
+    helper_names = (
+        {"YugenAudioUpdateInstaller.exe", "KenjiUpdateInstaller.exe"}
         if main_name.lower().endswith(".exe")
-        else "KenjiUpdateInstaller"
+        else {"YugenAudioUpdateInstaller", "KenjiUpdateInstaller"}
     )
-    required = {main_name, helper_name}
+    required = {main_name}
     names: set[str] = set()
     for path in payload_directory.rglob("*"):
         if not path.is_file():
@@ -234,9 +244,18 @@ def validate_payload_files(payload_directory: Path, main_name: str) -> None:
                 f"El paquete contiene un archivo no permitido: {relative}"
             )
         if len(relative.parts) == 1:
-            if relative.name not in required and relative.name != "README.md":
+            if (
+                relative.name not in required
+                and relative.name not in helper_names
+                and relative.name != "README.md"
+            ):
                 raise UpdateInstallationFailure(
                     f"El paquete contiene un archivo no permitido: {relative}"
+                )
+        elif relative.parts[0] == TOOLS_DIRECTORY:
+            if len(relative.parts) != 2 or relative.name not in ALLOWED_PACKAGED_TOOLS:
+                raise UpdateInstallationFailure(
+                    f"El paquete contiene una herramienta no permitida: {relative}"
                 )
         elif relative.parts[0] != PYINSTALLER_INTERNAL_DIRECTORY:
             raise UpdateInstallationFailure(
@@ -244,7 +263,10 @@ def validate_payload_files(payload_directory: Path, main_name: str) -> None:
             )
         names.add(relative.name)
     missing = required - names
-    if missing:
+    has_helper = bool(helper_names & names)
+    if missing or not has_helper:
+        if not has_helper:
+            missing.add("YugenAudioUpdateInstaller")
         raise UpdateInstallationFailure(
             "El paquete no contiene todos los ejecutables esperados: "
             + ", ".join(sorted(missing))
@@ -501,7 +523,7 @@ def run_installer(argv: list[str] | None = None) -> int:
             write_update_result(
                 result_path,
                 True,
-                f"Kenji Music Downloader se actualizó correctamente a v{arguments.version}.",
+                f"Yūgen Audio se actualizó correctamente a v{arguments.version}.",
             )
             try:
                 launch_application(new_main, new_main.parent)

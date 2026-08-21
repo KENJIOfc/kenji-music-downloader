@@ -1,0 +1,10 @@
+{
+  "version": "1.0.8",
+  "platform": "windows-x64",
+  "asset": {
+    "name": "YugenAudio-v1.0.8-Windows-x64.zip",
+    "sha256": "d5db372d5a00c52c59cfc3da1f5453ab0da0151f8bb0a9f5d4f39ec99277a543",
+    "size": 283727663
+  },
+  "notes": "Actualización de Yūgen Audio v1.0.8"
+}

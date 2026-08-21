@@ -14,13 +14,14 @@ from src.release_manifest import (
 
 
 VERSION = APP_VERSION
-WINDOWS_NAME = f"KenjiMusicDownloader-v{VERSION}-Windows-x64.zip"
-LINUX_NAME = f"KenjiMusicDownloader-v{VERSION}-Linux-x64.tar.gz"
+WINDOWS_NAME = f"YugenAudio-v{VERSION}-Windows-x64.zip"
+LINUX_NAME = f"YugenAudio-v{VERSION}-Linux-x64.tar.gz"
+LINUX_APPIMAGE_NAME = f"YugenAudio-v{VERSION}-Linux-x64.AppImage"
 
 
 class ReleaseManifestTests(unittest.TestCase):
     def test_release_version_is_centralized(self) -> None:
-        self.assertEqual(APP_VERSION, "1.0.7")
+        self.assertEqual(APP_VERSION, "1.0.8")
 
     def test_generates_windows_manifest_with_real_hash(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -41,6 +42,7 @@ class ReleaseManifestTests(unittest.TestCase):
                 manifest["asset"]["sha256"],
                 hashlib.sha256(content).hexdigest(),
             )
+            self.assertEqual(manifest["asset"]["size"], len(content))
             self.assertFalse((dist / "update.json").exists())
 
     def test_generates_linux_manifest_with_real_hash(self) -> None:
@@ -59,6 +61,25 @@ class ReleaseManifestTests(unittest.TestCase):
             self.assertEqual(
                 manifest["asset"]["sha256"],
                 hashlib.sha256(content).hexdigest(),
+            )
+
+    def test_prefers_linux_appimage_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            dist = Path(temporary)
+            tar_content = b"paquete linux tar"
+            appimage_content = b"paquete linux appimage"
+            (dist / LINUX_NAME).write_bytes(tar_content)
+            (dist / LINUX_APPIMAGE_NAME).write_bytes(appimage_content)
+
+            generate_release_manifests(dist, VERSION)
+            manifest = json.loads(
+                (dist / "update-linux.json").read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(manifest["asset"]["name"], LINUX_APPIMAGE_NAME)
+            self.assertEqual(
+                manifest["asset"]["sha256"],
+                hashlib.sha256(appimage_content).hexdigest(),
             )
 
     def test_generates_combined_manifest_when_both_packages_exist(self) -> None:

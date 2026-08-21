@@ -1,15 +1,17 @@
-﻿{
-  "version": "1.0.7",
+{
+  "version": "1.0.8",
   "assets": {
     "windows-x64": {
-      "name": "KenjiMusicDownloader-v1.0.7-Windows-x64.zip",
-      "sha256": "REEMPLAZAR_CON_SHA256_WINDOWS"
+      "name": "YugenAudio-v1.0.8-Windows-x64.zip",
+      "sha256": "REEMPLAZAR_CON_SHA256_WINDOWS",
+      "size": 0
     },
     "linux-x64": {
-      "name": "KenjiMusicDownloader-v1.0.7-Linux-x64.tar.gz",
-      "sha256": "REEMPLAZAR_CON_SHA256_LINUX"
+      "name": "YugenAudio-v1.0.8-Linux-x64.AppImage",
+      "sha256": "REEMPLAZAR_CON_SHA256_LINUX",
+      "size": 0
     }
   },
-  "notes": "ActualizaciÃ³n de Kenji Music Downloader v1.0.7"
+  "notes": "Actualización de Yūgen Audio v1.0.8"
 }
 

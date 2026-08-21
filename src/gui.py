@@ -1,14 +1,124 @@
-"""Interfaz gráfica de Kenji Music Downloader construida con Tkinter."""
+"""Interfaz gráfica de Yūgen Audio construida con Tkinter."""
 
+import os
 from pathlib import Path
 import platform
 import queue
+import re
+import shutil
+import sys
 import threading
 from time import perf_counter
+
+
+def _get_tcl_tk_cache_directory() -> Path:
+    if not getattr(sys, "frozen", False):
+        return (
+            Path(__file__).resolve().parent.parent
+            / "build"
+            / "tcl_tk_runtime_cache"
+        )
+    if os.name == "nt":
+        base = Path(
+            os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+        )
+        return base / "YugenAudio" / "tcl-tk-runtime"
+    base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return base / "yugen-audio" / "tcl-tk-runtime"
+
+
+def _patch_tcl_tk_scripts(tcl_root: Path) -> None:
+    replacements = (
+        (tcl_root / "tcl8.6" / "init.tcl", r"package require -exact Tcl\s+8\.6\.12", "package require Tcl 8.6"),
+        (tcl_root / "tk8.6" / "tk.tcl", r"package require -exact Tk\s+8\.6\.12", "package require Tk 8.6"),
+    )
+    for script_path, pattern, replacement in replacements:
+        text = script_path.read_text(encoding="utf-8")
+        script_path.write_text(
+            re.sub(pattern, replacement, text),
+            encoding="utf-8",
+        )
+
+
+def _compatible_tcl_tk_root(source_root: Path) -> Path:
+    init_script = source_root / "tcl8.6" / "init.tcl"
+    tk_script = source_root / "tk8.6" / "tk.tcl"
+    try:
+        needs_patch = (
+            "package require -exact Tcl" in init_script.read_text(encoding="utf-8")
+            or "package require -exact Tk" in tk_script.read_text(encoding="utf-8")
+        )
+    except OSError:
+        return source_root
+    if not needs_patch:
+        return source_root
+
+    cache_directory = _get_tcl_tk_cache_directory()
+    cached_root = cache_directory / "tcl"
+    marker_path = cache_directory / "source.txt"
+    source_marker = str(source_root.resolve())
+    try:
+        marker_matches = (
+            marker_path.is_file()
+            and marker_path.read_text(encoding="utf-8") == source_marker
+        )
+        cache_is_ready = (
+            (cached_root / "tcl8.6" / "init.tcl").is_file()
+            and (cached_root / "tk8.6" / "tk.tcl").is_file()
+            and marker_matches
+        )
+        if not cache_is_ready:
+            if cache_directory.exists():
+                shutil.rmtree(cache_directory)
+            cache_directory.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(source_root, cached_root)
+            _patch_tcl_tk_scripts(cached_root)
+            marker_path.write_text(source_marker, encoding="utf-8")
+    except OSError:
+        return source_root
+    return cached_root
+
+
+def _configure_tcl_tk_environment() -> None:
+    """Ayuda a Tkinter cuando Python o PyInstaller no ubican Tcl/Tk solos."""
+    candidate_roots = []
+    bundled_directory = getattr(sys, "_MEIPASS", None)
+    if bundled_directory:
+        candidate_roots.append(Path(bundled_directory) / "tcl")
+        candidate_roots.append(
+            Path(sys.executable).resolve().parent / "_internal" / "tcl"
+        )
+    candidate_roots.extend(
+        (
+            Path(getattr(sys, "base_prefix", sys.prefix)) / "tcl",
+            Path(sys.prefix) / "tcl",
+        )
+    )
+
+    for root in candidate_roots:
+        tcl_directory = root / "tcl8.6"
+        tk_directory = root / "tk8.6"
+        if (tcl_directory / "init.tcl").is_file() and (
+            tk_directory / "tk.tcl"
+        ).is_file():
+            compatible_root = _compatible_tcl_tk_root(root)
+            os.environ["TCL_LIBRARY"] = str(compatible_root / "tcl8.6")
+            os.environ["TK_LIBRARY"] = str(compatible_root / "tk8.6")
+            return
+
+
+_configure_tcl_tk_environment()
+
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import filedialog, messagebox, ttk
 import webbrowser
+
+try:
+    from PIL import Image, ImageTk
+except ImportError:  # pragma: no cover - fallback para entornos sin Pillow.
+    Image = None
+    ImageTk = None
 
 from src.audio_formats import (
     AUDIO_FORMATS,
@@ -39,13 +149,23 @@ from src.error_log import (
 )
 from src.config import (
     APP_DESCRIPTION,
+    APP_FULL_NAME,
     APP_NAME,
+    APP_TAGLINE,
     APP_VERSION,
     DOWNLOADS_DIRECTORY,
-    LOGO_HEADER_IMAGE_PATH,
-    TASKBAR_ICON_PATH,
-    TASKBAR_ICON_PREVIEW_PATH,
     SUPPORT_DISCORD_URL,
+    YUGEN_CONCERT_PLACEHOLDER_PATH,
+    YUGEN_DETAILS_DECORATION_PATH,
+    YUGEN_DOWNLOAD_BUTTON_PATH,
+    YUGEN_EMBLEM_PATH,
+    YUGEN_HEADER_EQUALIZER_PATH,
+    YUGEN_HERO_BANNER_PATH,
+    YUGEN_PLAQUE_PATH,
+    YUGEN_PROGRESS_BRUSH_PATH,
+    YUGEN_SIDEBAR_WAVES_PATH,
+    YUGEN_WINDOW_ICON_PATH,
+    YUGEN_WINDOW_ICON_PREVIEW_PATH,
     ConfigurationError,
     prepare_environment,
     prepare_output_directory,
@@ -128,20 +248,20 @@ THEME_PALETTES = {
         "warning": "#c77700",
     },
     "dark": {
-        "background": "#020a14",
-        "surface": "#061827",
-        "panel": "#071f32",
-        "panel_alt": "#0a2a42",
-        "foreground": "#f3fbff",
-        "muted": "#8fb7d9",
-        "accent": "#00d8ff",
-        "accent_2": "#2d8cff",
-        "selected": "#0e4265",
-        "border": "#00aef0",
-        "glow": "#35e6ff",
-        "success": "#3ee56f",
-        "error": "#ff4d6d",
-        "warning": "#ffd166",
+        "background": "#050B16",
+        "surface": "#081321",
+        "panel": "#0A1625",
+        "panel_alt": "#0E1C2E",
+        "foreground": "#F2F6FF",
+        "muted": "#AAB8CB",
+        "accent": "#00CFFF",
+        "accent_2": "#168BFF",
+        "selected": "#0B2742",
+        "border": "#162A40",
+        "glow": "#34E7FF",
+        "success": "#20C77A",
+        "error": "#FF5D6C",
+        "warning": "#FFD166",
     },
 }
 NEON_PANEL_STYLE = "Neon.TLabelframe"
@@ -156,8 +276,15 @@ PRIMARY_BUTTON_STYLE = "Primary.TButton"
 SECONDARY_BUTTON_STYLE = "Secondary.TButton"
 DANGER_BUTTON_STYLE = "Danger.TButton"
 NEON_PROGRESS_STYLE = "Neon.Horizontal.TProgressbar"
+SIDEBAR_BUTTON_STYLE = "Sidebar.TButton"
+SIDEBAR_ACTIVE_BUTTON_STYLE = "SidebarActive.TButton"
+YUGEN_CARD_STYLE = "YugenCard.TLabelframe"
+YUGEN_CARD_LABEL_STYLE = "YugenCard.TLabelframe.Label"
 FONT_FAMILY_CANDIDATES = (
+    "Rajdhani Medium",
     "Rajdhani",
+    "Orbitron",
+    "Eurostile",
     "Bahnschrift",
     "Segoe UI Semibold",
     "Segoe UI",
@@ -217,6 +344,207 @@ def choose_font_family(
         if candidate.lower() in normalized:
             return normalized[candidate.lower()]
     return "TkDefaultFont"
+
+
+class YugenImageStore:
+    """Carga assets una sola vez y genera tamaños seguros para Tkinter.
+
+    Pillow se usa si está instalado para mantener calidad con Lanczos. Si falta,
+    se conserva un fallback con PhotoImage para que la app no falle al abrir.
+    """
+
+    def __init__(self) -> None:
+        self._pil_originals: dict[Path, object] = {}
+        self._prepared_cache: dict[tuple[Path, bool], object] = {}
+        self._photo_cache: dict[tuple[Path, int, int, str, str, bool], tk.PhotoImage] = {}
+
+    def _open_original(self, path: Path):
+        if Image is None:
+            return None
+        resolved = Path(path)
+        image = self._pil_originals.get(resolved)
+        if image is None and resolved.is_file():
+            image = Image.open(resolved).convert("RGBA")
+            self._pil_originals[resolved] = image
+        return image
+
+    def _prepare_image(self, path: Path, trim: bool):
+        """Prepara una copia RGBA y recorta fondos neutros solo cuando aplica."""
+        original = self._open_original(path)
+        if original is None:
+            return None
+
+        cache_key = (Path(path), trim)
+        cached = self._prepared_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        prepared = original.copy().convert("RGBA")
+        if trim:
+            corner = prepared.getpixel((0, 0))[:3]
+
+            def is_neutral_background(red: int, green: int, blue: int, alpha: int) -> bool:
+                if alpha < 8:
+                    return True
+                neutral = (
+                    abs(red - green) <= 18
+                    and abs(red - blue) <= 18
+                    and abs(green - blue) <= 18
+                )
+                close_to_corner = (
+                    abs(red - corner[0])
+                    + abs(green - corner[1])
+                    + abs(blue - corner[2])
+                ) <= 85
+                luma = (red + green + blue) / 3
+                # Los fondos de algunos PNG son grises con variación suave.
+                # Conservamos trazos muy oscuros y volvemos transparente el
+                # resto de grises neutros para evitar rectángulos visibles.
+                return neutral and (close_to_corner or luma > 32)
+
+            get_pixel_data = getattr(prepared, "get_flattened_data", prepared.getdata)
+            cleaned_pixels = []
+            for red, green, blue, alpha in get_pixel_data():
+                if is_neutral_background(red, green, blue, alpha):
+                    cleaned_pixels.append((red, green, blue, 0))
+                else:
+                    cleaned_pixels.append((red, green, blue, alpha))
+            prepared.putdata(cleaned_pixels)
+
+            alpha_box = prepared.getchannel("A").getbbox()
+            if alpha_box is not None:
+                prepared = prepared.crop(alpha_box)
+
+        self._prepared_cache[cache_key] = prepared
+        return prepared
+
+    @staticmethod
+    def _crop_offset(extra: int, anchor: str) -> int:
+        """Calcula un desplazamiento de recorte para imágenes tipo cover."""
+        if extra <= 0:
+            return 0
+        if anchor in {"left", "top"}:
+            return 0
+        if anchor in {"right", "bottom"}:
+            return extra
+        return extra // 2
+
+    def get(
+        self,
+        path: Path,
+        size: tuple[int, int],
+        mode: str = "contain",
+        *,
+        anchor: str = "center",
+        trim: bool = False,
+    ) -> tk.PhotoImage | None:
+        """Devuelve una PhotoImage redimensionada proporcionalmente."""
+        width = max(1, int(size[0]))
+        height = max(1, int(size[1]))
+        key = (Path(path), width, height, mode, anchor, trim)
+        if key in self._photo_cache:
+            return self._photo_cache[key]
+
+        original = self._prepare_image(path, trim)
+        if original is None:
+            try:
+                if path.is_file():
+                    # Sin Pillow no redimensionamos imágenes grandes para no deformar
+                    # la interfaz; usamos un lienzo transparente como degradación segura.
+                    photo = tk.PhotoImage(width=width, height=height)
+                    self._photo_cache[key] = photo
+                    return photo
+            except tk.TclError as error:
+                log_error("Assets", f"No se pudo cargar la imagen {path}.", error)
+            return None
+
+        source_width, source_height = original.size
+        if source_width <= 0 or source_height <= 0:
+            return None
+
+        if mode == "cover":
+            scale = max(width / source_width, height / source_height)
+        elif mode == "fit_width":
+            scale = width / source_width
+        else:
+            scale = min(width / source_width, height / source_height)
+        resized_size = (
+            max(1, int(source_width * scale)),
+            max(1, int(source_height * scale)),
+        )
+        resized = original.resize(resized_size, Image.Resampling.LANCZOS)
+        if mode == "cover":
+            left = self._crop_offset(resized_size[0] - width, anchor)
+            top = self._crop_offset(resized_size[1] - height, anchor)
+            canvas = resized.crop((left, top, left + width, top + height))
+        elif mode == "fit_width":
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            left = 0
+            # El banner original tiene luna/silueta arriba-derecha y olas abajo.
+            # Tomamos un recorte alto moderado, no centrado agresivamente, para
+            # conservar más composición original.
+            top = min(0, (height - resized_size[1]) // 2)
+            if resized_size[1] > height:
+                crop_top = max(0, min(resized_size[1] - height, int((resized_size[1] - height) * 0.18)))
+                resized = resized.crop((0, crop_top, width, crop_top + height))
+                top = 0
+            canvas.alpha_composite(resized, (left, top))
+        else:
+            canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            horizontal_extra = width - resized_size[0]
+            vertical_extra = height - resized_size[1]
+            if anchor == "right":
+                left = max(0, horizontal_extra)
+            elif anchor == "left":
+                left = 0
+            else:
+                left = horizontal_extra // 2
+            if anchor == "bottom":
+                top = max(0, vertical_extra)
+            elif anchor == "top":
+                top = 0
+            else:
+                top = vertical_extra // 2
+            canvas.alpha_composite(resized, (left, top))
+        photo = ImageTk.PhotoImage(canvas)
+        self._photo_cache[key] = photo
+        return photo
+
+    def crop_width(
+        self,
+        path: Path,
+        size: tuple[int, int],
+        visible_ratio: float,
+        *,
+        trim: bool = True,
+    ) -> tk.PhotoImage | None:
+        """Crea textura horizontal recortada para el progreso real."""
+        width = max(1, int(size[0]))
+        height = max(1, int(size[1]))
+        ratio = max(0.0, min(1.0, visible_ratio))
+        visible_width = max(1, int(width * ratio))
+        key = (Path(path), visible_width, height, f"crop-{ratio:.3f}", "left", trim)
+        if key in self._photo_cache:
+            return self._photo_cache[key]
+
+        original = self._prepare_image(path, trim)
+        if original is None:
+            return self.get(path, (visible_width, height), "cover")
+        source_width, source_height = original.size
+        scale = max(width / source_width, height / source_height)
+        resized = original.resize(
+            (
+                max(1, int(source_width * scale)),
+                max(1, int(source_height * scale)),
+            ),
+            Image.Resampling.LANCZOS,
+        )
+        top = self._crop_offset(resized.height - height, "center")
+        full_bar = resized.crop((0, top, width, top + height))
+        cropped = full_bar.crop((0, 0, visible_width, height))
+        photo = ImageTk.PhotoImage(cropped)
+        self._photo_cache[key] = photo
+        return photo
 
 
 def format_bytes(value: int | float | None) -> str:
@@ -305,9 +633,21 @@ class KenjiMusicDownloaderGUI:
         self.managed_menus: list[tk.Menu] = []
         self.history_item_entries: dict[str, DownloadHistoryEntry] = {}
         # Las referencias se guardan en la instancia para que Tk no libere imágenes.
+        self.images = YugenImageStore()
         self.window_icon_image: tk.PhotoImage | None = None
-        self.logo_header_image: tk.PhotoImage | None = None
-        self.header_decoration_canvas: tk.Canvas | None = None
+        self.yugen_photo_refs: dict[str, tk.PhotoImage] = {}
+        self.header_canvas: tk.Canvas | None = None
+        self.sidebar_canvas: tk.Canvas | None = None
+        self.progress_canvas: tk.Canvas | None = None
+        self.progress_percentage = 0.0
+        self.progress_target_percentage = 0.0
+        self.progress_animation_job: str | None = None
+        self.progress_indeterminate_active = False
+        self.progress_indeterminate_offset = 0
+        self.thumbnail_label: ttk.Label | None = None
+        self.details_panel: ttk.LabelFrame | None = None
+        self.details_decoration_label: ttk.Label | None = None
+        self.details_decoration_resize_job: str | None = None
 
         saved_settings = load_user_settings()
         saved_format = get_audio_format(saved_settings.output_format)
@@ -394,14 +734,14 @@ class KenjiMusicDownloaderGUI:
 
     def _set_window_icon(self) -> None:
         """Configura el icono de ventana en Windows y Linux usando los assets."""
-        if platform.system() == "Windows" and TASKBAR_ICON_PATH.is_file():
+        if platform.system() == "Windows" and YUGEN_WINDOW_ICON_PATH.is_file():
             try:
-                self.root.iconbitmap(default=str(TASKBAR_ICON_PATH))
+                self.root.iconbitmap(default=str(YUGEN_WINDOW_ICON_PATH))
                 return
             except tk.TclError as error:
-                log_error("Icono", "No se pudo aplicar logo_main.ico.", error)
+                log_error("Icono", "No se pudo aplicar yugen_audio.ico.", error)
 
-        self.window_icon_image = self._load_photo_image(TASKBAR_ICON_PREVIEW_PATH)
+        self.window_icon_image = self._load_photo_image(YUGEN_WINDOW_ICON_PREVIEW_PATH)
         if self.window_icon_image is not None:
             try:
                 self.root.iconphoto(True, self.window_icon_image)
@@ -409,18 +749,52 @@ class KenjiMusicDownloaderGUI:
                 log_error("Icono", "No se pudo aplicar el icono PNG.", error)
 
     def _build_widgets(self) -> None:
-        """Crea los controles usando únicamente componentes estándar de Tkinter."""
-        scroll_host = ttk.Frame(self.root, style="Root.TFrame")
-        scroll_host.pack(fill="both", expand=True)
-        scroll_host.columnconfigure(0, weight=1)
-        scroll_host.rowconfigure(0, weight=1)
+        """Crea la nueva interfaz visual Yūgen sin cambiar callbacks internos."""
+        shell = ttk.Frame(self.root, style="Root.TFrame")
+        shell.pack(fill="both", expand=True)
+        shell.columnconfigure(1, weight=1)
+        shell.rowconfigure(0, weight=1)
 
-        # El lienzo mantiene accesibles las secciones inferiores en pantallas bajas.
-        self.main_canvas = tk.Canvas(
-            scroll_host,
+        sidebar = ttk.Frame(shell, width=110, padding=(8, 14), style="Sidebar.TFrame")
+        sidebar.grid(row=0, column=0, sticky="ns")
+        sidebar.grid_propagate(False)
+        sidebar.rowconfigure(6, weight=1)
+
+        ttk.Label(sidebar, text="MENU", style="SidebarIcon.TLabel").grid(
+            row=0, column=0, pady=(0, 22)
+        )
+        self._build_sidebar_button(sidebar, "Descarga", self._scroll_to_top, True).grid(
+            row=1, column=0, sticky="ew", pady=(0, 10)
+        )
+        self._build_sidebar_button(
+            sidebar, "Historial", self._scroll_to_history, False
+        ).grid(row=2, column=0, sticky="ew", pady=(0, 10))
+        self._build_sidebar_button(
+            sidebar, "Ajustes", self._show_settings_info, False
+        ).grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        self._build_sidebar_button(sidebar, "Acerca de", self._show_about, False).grid(
+            row=4, column=0, sticky="ew", pady=(0, 10)
+        )
+
+        self.sidebar_canvas = tk.Canvas(
+            sidebar,
+            width=94,
+            height=180,
             borderwidth=0,
             highlightthickness=0,
         )
+        self.sidebar_canvas.grid(row=6, column=0, sticky="s", pady=(12, 6))
+        self.sidebar_canvas.bind("<Configure>", lambda _event: self._draw_sidebar())
+        ttk.Label(sidebar, text=f"Yūgen\nv{APP_VERSION}", style="SidebarFooter.TLabel").grid(
+            row=7, column=0, sticky="s"
+        )
+
+        scroll_host = ttk.Frame(shell, style="Root.TFrame")
+        scroll_host.grid(row=0, column=1, sticky="nsew")
+        scroll_host.columnconfigure(0, weight=1)
+        scroll_host.rowconfigure(0, weight=1)
+
+        self.main_canvas = tk.Canvas(scroll_host, borderwidth=0, highlightthickness=0)
         self.main_canvas.grid(row=0, column=0, sticky="nsew")
         self.main_scrollbar = ttk.Scrollbar(
             scroll_host,
@@ -432,7 +806,7 @@ class KenjiMusicDownloaderGUI:
 
         container = ttk.Frame(
             self.main_canvas,
-            padding=(18, 10, 18, 8),
+            padding=(14, 12, 14, 10),
             style="Main.TFrame",
         )
         self.main_container = container
@@ -448,53 +822,14 @@ class KenjiMusicDownloaderGUI:
         self.root.bind_all("<Button-5>", self._on_main_mousewheel, add="+")
         container.columnconfigure(0, weight=1)
 
-        header = ttk.Frame(container, padding=(16, 12), style="Header.TFrame")
-        header.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 9))
-        header.columnconfigure(1, weight=1)
-        header.columnconfigure(2, weight=1)
-
-        self.logo_header_image = self._load_photo_image(LOGO_HEADER_IMAGE_PATH)
-        if self.logo_header_image is None:
-            self.logo_header_image = self._load_photo_image(TASKBAR_ICON_PREVIEW_PATH)
-
-        logo_label = ttk.Label(header, style="Header.TLabel")
-        if self.logo_header_image is not None:
-            logo_label.configure(image=self.logo_header_image)
-        else:
-            logo_label.configure(text="♫", font=("TkDefaultFont", 44, "bold"))
-        logo_label.grid(row=0, column=0, rowspan=3, sticky="w", padx=(0, 16))
-
-        ttk.Label(header, text="Kenji Music", style=NEON_TITLE_STYLE).grid(
-            row=0,
-            column=1,
-            sticky="sw",
-        )
-        ttk.Label(
-            header,
-            text="D o w n l o a d e r",
-            style="BrandSubtitleLarge.TLabel",
-        ).grid(row=1, column=1, sticky="w", pady=(0, 3))
-        ttk.Label(
-            header,
-            text="Descarga el audio de un video individual de YouTube.",
-            style=NEON_SUBTITLE_STYLE,
-        ).grid(row=2, column=1, sticky="nw")
-
-        self.header_decoration_canvas = tk.Canvas(
-            header,
-            width=260,
-            height=104,
+        self.header_canvas = tk.Canvas(
+            container,
+            height=255,
             borderwidth=0,
-            highlightthickness=0,
+            highlightthickness=1,
         )
-        self.header_decoration_canvas.grid(
-            row=0,
-            column=2,
-            rowspan=3,
-            sticky="e",
-            padx=(18, 0),
-        )
-        self.header_decoration_canvas.bind(
+        self.header_canvas.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        self.header_canvas.bind(
             "<Configure>",
             lambda _event: self._draw_header_decoration(),
             add="+",
@@ -502,229 +837,243 @@ class KenjiMusicDownloaderGUI:
 
         form_panel = ttk.LabelFrame(
             container,
-            text="  ENLACE Y CONFIGURACIÓN  ",
-            padding=(14, 10, 14, 10),
-            style=NEON_PANEL_STYLE,
+            text="  FUENTE Y CONFIGURACIÓN  ",
+            padding=(14, 12, 14, 12),
+            style=YUGEN_CARD_STYLE,
         )
-        form_panel.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(0, 10))
+        form_panel.grid(row=1, column=0, sticky="ew", pady=(0, 10))
         form_panel.columnconfigure(0, weight=1)
+        form_panel.columnconfigure(1, weight=0)
 
-        ttk.Label(
-            form_panel,
-            text="🔗  Enlace de YouTube:",
-            style=NEON_SECTION_LABEL_STYLE,
-        ).grid(
-            row=0, column=0, columnspan=3, sticky="w"
+        fields = ttk.Frame(form_panel, style="Panel.TFrame")
+        fields.grid(row=0, column=0, sticky="nsew", padx=(0, 14))
+        fields.columnconfigure(0, weight=1)
+
+        ttk.Label(fields, text="Enlace de YouTube", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=0, column=0, sticky="w"
         )
-        url_row = ttk.Frame(form_panel, style="Panel.TFrame")
-        url_row.grid(row=1, column=0, columnspan=3, sticky="ew", pady=(4, 9))
+        url_row = ttk.Frame(fields, style="Panel.TFrame")
+        url_row.grid(row=1, column=0, sticky="ew", pady=(5, 10))
         url_row.columnconfigure(0, weight=1)
         self.url_entry = ttk.Entry(url_row, textvariable=self.url_value)
-        self.url_entry.grid(row=0, column=0, sticky="ew", ipady=3)
+        self.url_entry.grid(row=0, column=0, sticky="ew", ipady=5)
         self.paste_button = ttk.Button(
             url_row,
-            text="🔗  Pegar enlace",
+            text="Pegar",
             command=self._paste_link,
-            width=18,
+            width=12,
             style=PRIMARY_BUTTON_STYLE,
         )
-        self.paste_button.grid(row=0, column=1, padx=(8, 0), ipady=2)
+        self.paste_button.grid(row=0, column=1, padx=(8, 0), ipady=3)
         self.clear_button = ttk.Button(
             url_row,
-            text="🧹  Limpiar",
+            text="Limpiar",
             command=self._clear_interface,
-            width=14,
+            width=12,
             style=SECONDARY_BUTTON_STYLE,
         )
-        self.clear_button.grid(row=0, column=2, padx=(5, 0), ipady=2)
+        self.clear_button.grid(row=0, column=2, padx=(6, 0), ipady=3)
 
-        ttk.Label(
-            form_panel,
-            text="📁  Carpeta de salida:",
-            style=NEON_SECTION_LABEL_STYLE,
-        ).grid(
-            row=2, column=0, columnspan=3, sticky="w"
+        ttk.Label(fields, text="Carpeta de salida", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=2, column=0, sticky="w"
         )
+        folder_row = ttk.Frame(fields, style="Panel.TFrame")
+        folder_row.grid(row=3, column=0, sticky="ew", pady=(5, 10))
+        folder_row.columnconfigure(0, weight=1)
         self.output_entry = ttk.Entry(
-            form_panel,
+            folder_row,
             textvariable=self.output_value,
             state="readonly",
         )
-        self.output_entry.grid(row=3, column=0, sticky="ew", pady=(4, 9), ipady=3)
-
+        self.output_entry.grid(row=0, column=0, sticky="ew", ipady=5)
         self.folder_button = ttk.Button(
-            form_panel,
-            text="📂  Elegir carpeta...",
+            folder_row,
+            text="...",
             command=self._select_output_directory,
-            width=18,
+            width=4,
             style=SECONDARY_BUTTON_STYLE,
         )
-        self.folder_button.grid(row=3, column=1, padx=(8, 0), pady=(4, 9))
-
+        self.folder_button.grid(row=0, column=1, padx=(8, 0), ipady=3)
         self.open_folder_button = ttk.Button(
-            form_panel,
-            text="📂  Abrir carpeta",
+            folder_row,
+            text="Abrir",
             command=self._open_output_directory,
-            width=17,
+            width=7,
             style=SECONDARY_BUTTON_STYLE,
         )
-        self.open_folder_button.grid(row=3, column=2, padx=(6, 0), pady=(4, 9))
+        self.open_folder_button.grid(row=0, column=2, padx=(5, 0), ipady=3)
 
         selectors = ttk.Frame(form_panel, style="Panel.TFrame")
-        selectors.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(0, 1))
+        selectors.grid(row=0, column=1, sticky="nsew", padx=(0, 14))
         selectors.columnconfigure(0, weight=1)
-        selectors.columnconfigure(1, weight=1)
-        ttk.Label(
-            selectors,
-            text="🎵  Formato de salida:",
-            style=NEON_SECTION_LABEL_STYLE,
-        ).grid(
+        ttk.Label(selectors, text="Formato", style=NEON_SECTION_LABEL_STYLE).grid(
             row=0, column=0, sticky="w"
-        )
-        ttk.Label(
-            selectors,
-            text="▥  Calidad de audio:",
-            style=NEON_SECTION_LABEL_STYLE,
-        ).grid(
-            row=0, column=1, sticky="w", padx=(12, 0)
         )
         self.format_selector = ttk.Combobox(
             selectors,
             textvariable=self.format_value,
             values=[audio_format.selector_label for audio_format in AUDIO_FORMATS],
             state="readonly",
+            width=24,
         )
-        self.format_selector.grid(
-            row=1,
-            column=0,
-            sticky="ew",
-            pady=(3, 0),
-            ipady=2,
+        self.format_selector.grid(row=1, column=0, sticky="ew", pady=(6, 18), ipady=4)
+        ttk.Label(selectors, text="Calidad de audio", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=2, column=0, sticky="w"
         )
         self.quality_selector = ttk.Combobox(
             selectors,
             textvariable=self.quality_value,
             values=[quality.selector_label for quality in AUDIO_QUALITIES],
             state="readonly",
+            width=24,
         )
-        self.quality_selector.grid(
-            row=1,
-            column=1,
-            sticky="ew",
-            padx=(12, 0),
-            pady=(3, 0),
-            ipady=2,
-        )
+        self.quality_selector.grid(row=3, column=0, sticky="ew", pady=(6, 0), ipady=4)
         self.format_selector.bind("<<ComboboxSelected>>", self._preference_changed)
         self.quality_selector.bind("<<ComboboxSelected>>", self._preference_changed)
 
+        download_card = ttk.Frame(form_panel, padding=(12, 10), style="DownloadCard.TFrame")
+        download_card.grid(row=0, column=2, sticky="ns")
+        download_card.grid_propagate(False)
+        download_card.configure(width=176, height=188)
+        self.download_icon_label = ttk.Label(download_card, style="DownloadCard.TLabel")
+        self.download_icon_label.grid(row=0, column=0, pady=(0, 6))
+        self.download_button = ttk.Button(
+            download_card,
+            text="INICIAR\nDESCARGA",
+            command=self._start_download,
+            width=16,
+            style=PRIMARY_BUTTON_STYLE,
+        )
+        self.download_button.grid(row=1, column=0, ipady=5)
+
         progress_panel = ttk.LabelFrame(
             container,
-            text="  PROGRESO DE DESCARGA  ",
+            text="  PROGRESO  ",
             padding=(14, 10, 14, 10),
-            style=NEON_PANEL_STYLE,
+            style=YUGEN_CARD_STYLE,
         )
-        progress_panel.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(0, 9))
+        progress_panel.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         progress_panel.columnconfigure(0, weight=1)
-
-        progress_row = ttk.Frame(progress_panel, style="Panel.TFrame")
-        progress_row.grid(row=0, column=0, sticky="ew")
-        progress_row.columnconfigure(0, weight=1)
+        self.progress_canvas = tk.Canvas(
+            progress_panel,
+            height=28,
+            borderwidth=0,
+            highlightthickness=1,
+        )
+        self.progress_canvas.grid(row=0, column=0, sticky="ew", padx=(0, 16))
+        self.progress_canvas.bind("<Configure>", lambda _event: self._draw_yugen_progress())
+        ttk.Label(
+            progress_panel,
+            textvariable=self.percentage_value,
+            width=7,
+            style=NEON_PERCENT_STYLE,
+        ).grid(row=0, column=1, padx=(0, 18))
+        ttk.Label(progress_panel, text="Tiempo restante", style=NEON_MUTED_STYLE).grid(
+            row=0, column=2, sticky="e"
+        )
+        ttk.Label(progress_panel, textvariable=self.eta_value, style=NEON_VALUE_STYLE).grid(
+            row=0, column=3, padx=(8, 0), sticky="e"
+        )
         self.progress_bar = ttk.Progressbar(
-            progress_row,
+            progress_panel,
             mode="determinate",
             maximum=100,
             style=NEON_PROGRESS_STYLE,
         )
-        self.progress_bar.grid(row=0, column=0, sticky="ew", ipady=5)
-        ttk.Label(
-            progress_row,
-            textvariable=self.percentage_value,
-            width=7,
-            style=NEON_PERCENT_STYLE,
-        ).grid(
-            row=0, column=1, padx=(10, 0)
-        )
+
+        details_container = ttk.Frame(container, style="Main.TFrame")
+        details_container.grid(row=3, column=0, sticky="ew", pady=(0, 10))
+        details_container.columnconfigure(1, weight=1)
+        details_container.rowconfigure(0, weight=1)
+
+        thumb_card = ttk.Frame(details_container, padding=0, style="MediaCard.TFrame")
+        thumb_card.grid(row=0, column=0, sticky="nw", padx=(0, 14))
+        thumb_card.grid_propagate(False)
+        thumb_card.configure(width=268, height=201)
+        self.thumbnail_label = ttk.Label(thumb_card, style="MediaCard.TLabel")
+        self.thumbnail_label.grid(row=0, column=0)
 
         details = ttk.LabelFrame(
-            container,
+            details_container,
             text="  DETALLES DEL PROCESO  ",
-            padding=(14, 10, 14, 10),
-            style=NEON_PANEL_STYLE,
+            padding=(20, 16, 20, 16),
+            style=YUGEN_CARD_STYLE,
         )
-        details.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(0, 9))
+        details.grid(row=0, column=1, sticky="nsew")
+        details.columnconfigure(0, weight=0)
         details.columnconfigure(1, weight=1)
-        details.columnconfigure(3, weight=1)
-        details.columnconfigure(5, weight=1)
+        details.rowconfigure(0, weight=1)
+        details.rowconfigure(7, weight=1)
+        self.details_panel = details
 
-        ttk.Label(details, text="Estado actual:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=0, column=0, sticky="nw"
+        ttk.Label(details, text="Estado", style=NEON_SECTION_LABEL_STYLE).grid(
+            row=1, column=0, sticky="w", pady=(0, 6)
         )
-        ttk.Label(
-            details,
-            textvariable=self.status_value,
-            wraplength=560,
-            style=NEON_VALUE_STYLE,
-        ).grid(
-            row=0, column=1, columnspan=5, sticky="w", padx=(8, 0)
+        ttk.Label(details, textvariable=self.status_value, style=NEON_VALUE_STYLE).grid(
+            row=1, column=1, sticky="w", padx=(18, 210), pady=(0, 6)
         )
-
-        ttk.Label(details, text="Video:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=1, column=0, sticky="nw", pady=(3, 0)
+        ttk.Label(details, text="Video", style=NEON_MUTED_STYLE).grid(
+            row=2, column=0, sticky="w", pady=(0, 6)
         )
         ttk.Label(
             details,
             textvariable=self.video_title_value,
             style=NEON_MUTED_STYLE,
-            wraplength=560,
-        ).grid(row=1, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(3, 0))
-
-        ttk.Label(details, text="Tamaño:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=2, column=0, sticky="w", pady=(4, 0)
+            wraplength=430,
+        ).grid(row=2, column=1, sticky="w", padx=(18, 210), pady=(0, 6))
+        ttk.Label(details, text="Tamaño", style=NEON_MUTED_STYLE).grid(
+            row=3, column=0, sticky="w", pady=(0, 6)
         )
         ttk.Label(details, textvariable=self.size_value, style=NEON_MUTED_STYLE).grid(
-            row=2, column=1, sticky="w", padx=(6, 14), pady=(4, 0)
+            row=3, column=1, sticky="w", padx=(18, 210), pady=(0, 6)
         )
-        ttk.Label(details, text="Velocidad:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=2, column=2, sticky="w", pady=(4, 0)
+        ttk.Label(details, text="Velocidad", style=NEON_MUTED_STYLE).grid(
+            row=4, column=0, sticky="w", pady=(0, 6)
         )
         ttk.Label(details, textvariable=self.speed_value, style=NEON_MUTED_STYLE).grid(
-            row=2, column=3, sticky="w", padx=(6, 14), pady=(4, 0)
+            row=4, column=1, sticky="w", padx=(18, 210), pady=(0, 6)
         )
-        ttk.Label(details, text="Tiempo restante:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=2, column=4, sticky="w", pady=(4, 0)
+        ttk.Label(details, text="Tiempo restante", style=NEON_MUTED_STYLE).grid(
+            row=5, column=0, sticky="w", pady=(0, 6)
         )
         ttk.Label(details, textvariable=self.eta_value, style=NEON_MUTED_STYLE).grid(
-            row=2, column=5, sticky="w", padx=(6, 0), pady=(4, 0)
+            row=5, column=1, sticky="w", padx=(18, 210), pady=(0, 6)
         )
-
-        ttk.Label(details, text="Tiempos:", style=NEON_SECTION_LABEL_STYLE).grid(
-            row=3, column=0, sticky="nw", pady=(4, 0)
+        ttk.Label(details, text="Tiempos", style=NEON_MUTED_STYLE).grid(
+            row=6, column=0, sticky="nw"
         )
         ttk.Label(
             details,
             textvariable=self.timings_value,
             style=NEON_MUTED_STYLE,
-            wraplength=580,
-        ).grid(row=3, column=1, columnspan=5, sticky="w", padx=(6, 0), pady=(4, 0))
+            wraplength=430,
+        ).grid(row=6, column=1, sticky="w", padx=(18, 210))
+        self.details_decoration_label = ttk.Label(details, style="Decoration.TLabel")
+        self.details_decoration_label.place(
+            relx=1.0,
+            rely=1.0,
+            anchor="se",
+            x=-2,
+            y=-2,
+        )
+        details.bind(
+            "<Configure>",
+            self._schedule_details_decoration_refresh,
+            add="+",
+        )
 
         history_frame = ttk.LabelFrame(
             container,
-            text="  HISTORIAL DE DESCARGAS (ÚLTIMAS 20)  ",
-            padding=6,
-            style=NEON_PANEL_STYLE,
+            text="  HISTORIAL DE DESCARGAS  ",
+            padding=(12, 9, 12, 10),
+            style=YUGEN_CARD_STYLE,
         )
-        history_frame.grid(
-            row=4,
-            column=0,
-            columnspan=3,
-            sticky="ew",
-            pady=(0, 8),
-        )
+        history_frame.grid(row=4, column=0, sticky="ew", pady=(0, 10))
         history_frame.columnconfigure(0, weight=1)
         history_frame.rowconfigure(0, weight=1)
+        self.history_frame = history_frame
 
-        history_columns = ("name", "format", "quality", "status", "path")
+        history_columns = ("number", "name", "format", "quality", "status", "path")
         self.history_tree = ttk.Treeview(
             history_frame,
             columns=history_columns,
@@ -732,25 +1081,27 @@ class KenjiMusicDownloaderGUI:
             height=HISTORY_VISIBLE_ROWS,
         )
         history_headings = {
-            "name": "Archivo / canción",
+            "number": "#",
+            "name": "Título",
             "format": "Formato",
             "quality": "Calidad",
             "status": "Estado",
-            "path": "Ruta",
+            "path": "Carpeta",
         }
         history_widths = {
-            "name": 300,
-            "format": 80,
-            "quality": 105,
-            "status": 105,
-            "path": 420,
+            "number": 42,
+            "name": 320,
+            "format": 85,
+            "quality": 120,
+            "status": 120,
+            "path": 360,
         }
         for column in history_columns:
             self.history_tree.heading(column, text=history_headings[column])
             self.history_tree.column(
                 column,
                 width=history_widths[column],
-                minwidth=65,
+                minwidth=42,
                 stretch=False,
             )
         self.history_tree.grid(row=0, column=0, sticky="nsew")
@@ -771,44 +1122,50 @@ class KenjiMusicDownloaderGUI:
             yscrollcommand=history_scroll.set,
             xscrollcommand=horizontal_scroll.set,
         )
-        self.history_tree.bind(
-            "<<TreeviewSelect>>",
-            self._history_selection_changed,
-        )
+        self.history_tree.bind("<<TreeviewSelect>>", self._history_selection_changed)
         self.history_tree.bind("<Double-1>", self._history_double_click)
         self.history_tree.bind("<Button-3>", self._show_history_context_menu)
 
-        history_actions = ttk.Frame(history_frame)
-        history_actions.grid(row=2, column=0, columnspan=2, pady=(5, 0))
+        history_actions = ttk.Frame(history_frame, style="Panel.TFrame")
+        history_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        history_actions.columnconfigure(0, weight=1)
+        history_actions.columnconfigure(5, weight=1)
 
         ttk.Button(
             history_actions,
-            text="↗  Abrir seleccionado",
-            command=self._open_selected_history_file,
-            width=21,
+            text="Abrir carpeta de descargas",
+            command=self._open_output_directory,
+            width=27,
             style=SECONDARY_BUTTON_STYLE,
-        ).grid(row=0, column=0, padx=(0, 3))
+        ).grid(row=0, column=0, sticky="w")
         ttk.Button(
             history_actions,
-            text="📁  Abrir su carpeta",
-            command=self._open_selected_history_folder,
+            text="Abrir seleccionado",
+            command=self._open_selected_history_file,
             width=20,
             style=SECONDARY_BUTTON_STYLE,
-        ).grid(row=0, column=1, padx=3)
+        ).grid(row=0, column=1, padx=(8, 0))
         ttk.Button(
             history_actions,
-            text="📋  Copiar ruta",
-            command=self._copy_selected_history_path,
+            text="Abrir su carpeta",
+            command=self._open_selected_history_folder,
             width=18,
             style=SECONDARY_BUTTON_STYLE,
-        ).grid(row=0, column=2, padx=3)
+        ).grid(row=0, column=2, padx=(8, 0))
         ttk.Button(
             history_actions,
-            text="🗑  Eliminar entrada",
+            text="Copiar ruta",
+            command=self._copy_selected_history_path,
+            width=16,
+            style=SECONDARY_BUTTON_STYLE,
+        ).grid(row=0, column=3, padx=(8, 0))
+        ttk.Button(
+            history_actions,
+            text="Eliminar entrada",
             command=self._delete_selected_history_entry,
-            width=20,
+            width=18,
             style=DANGER_BUTTON_STYLE,
-        ).grid(row=0, column=3, padx=(3, 0))
+        ).grid(row=0, column=4, padx=(8, 0))
 
         self.history_context_menu = tk.Menu(self.root, tearoff=False)
         self.history_context_menu.add_command(
@@ -830,97 +1187,410 @@ class KenjiMusicDownloaderGUI:
         )
 
         actions = ttk.Frame(container, style="Main.TFrame")
-        actions.grid(row=5, column=0, columnspan=3, sticky="ew")
+        actions.grid(row=5, column=0, sticky="ew")
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(4, weight=1)
 
-        self.download_button = ttk.Button(
-            actions,
-            text="⬇  Descargar audio",
-            command=self._start_download,
-            width=24,
-            style=PRIMARY_BUTTON_STYLE,
-        )
-        self.download_button.grid(row=0, column=1, ipady=4)
-
         self.cancel_button = ttk.Button(
             actions,
-            text="⊗  Cancelar",
+            text="Cancelar",
             command=self._cancel_download,
             state="disabled",
-            width=14,
+            width=18,
             style=SECONDARY_BUTTON_STYLE,
         )
-        self.cancel_button.grid(row=0, column=2, padx=(10, 0), ipady=4)
+        self.cancel_button.grid(row=0, column=1, padx=(0, 8), ipady=4)
 
         self.open_file_button = ttk.Button(
             actions,
-            text="▣  Abrir archivo",
+            text="Abrir archivo",
             command=self._open_last_downloaded_file,
             state="disabled",
-            width=16,
+            width=18,
             style=SECONDARY_BUTTON_STYLE,
         )
-        self.open_file_button.grid(row=0, column=3, padx=(8, 0), ipady=4)
+        self.open_file_button.grid(row=0, column=2, padx=(8, 0), ipady=4)
 
         ttk.Label(container, text=f"v{APP_VERSION}", style="Version.TLabel").grid(
             row=6,
             column=0,
-            columnspan=3,
-            pady=(7, 0),
+            pady=(8, 0),
         )
+        self._refresh_static_yugen_images()
+        self._draw_yugen_progress()
         self.url_entry.focus_set()
 
+    def _build_sidebar_button(
+        self,
+        parent: ttk.Frame,
+        text: str,
+        command,
+        active: bool,
+    ) -> ttk.Button:
+        """Crea botones compactos de navegación sin modificar funciones internas."""
+        return ttk.Button(
+            parent,
+            text=text,
+            command=command,
+            style=SIDEBAR_ACTIVE_BUTTON_STYLE if active else SIDEBAR_BUTTON_STYLE,
+            width=10,
+        )
+
     def _draw_header_decoration(self) -> None:
-        """Dibuja una onda/equalizador ligero inspirado en la referencia visual."""
-        canvas = self.header_decoration_canvas
+        """Dibuja el encabezado Yūgen con banner y recursos reales."""
+        canvas = self.header_canvas
         if canvas is None:
             return
 
         palette = THEME_PALETTES.get(self.theme_value.get(), THEME_PALETTES["dark"])
         try:
-            width = max(canvas.winfo_width(), 260)
-            height = max(canvas.winfo_height(), 90)
+            width = max(canvas.winfo_width(), 760)
+            height = max(canvas.winfo_height(), 245)
         except tk.TclError:
             return
 
         canvas.delete("all")
-        canvas.configure(background=palette["surface"])
-        baseline = int(height * 0.70)
-        canvas.create_line(0, baseline, width, baseline, fill=palette["selected"])
+        canvas.configure(background=palette["background"], highlightbackground=palette["border"])
+        banner = self.images.get(
+            YUGEN_HERO_BANNER_PATH,
+            (width, height),
+            "fit_width",
+            anchor="right",
+        )
+        if banner is not None:
+            self.yugen_photo_refs["hero_banner"] = banner
+            canvas.create_image(0, 0, image=banner, anchor="nw")
+        else:
+            canvas.create_rectangle(0, 0, width, height, fill=palette["surface"], outline="")
 
-        bar_count = 28
-        gap = max(4, width // (bar_count + 5))
-        start = max(8, width - (bar_count * gap) - 10)
-        for index in range(bar_count):
-            x = start + index * gap
-            bar_height = 12 + ((index * 13) % 55) + ((index * 7) % 19)
-            top = max(12, baseline - bar_height)
-            color = palette["accent"] if index % 3 else palette["accent_2"]
-            canvas.create_rectangle(
-                x,
-                top,
-                x + 3,
-                baseline,
-                fill=color,
-                outline=color,
+        # Capa oscura ligera para que el texto de la izquierda siempre sea legible.
+        canvas.create_rectangle(0, 0, int(width * 0.58), height, fill="#050B16", stipple="gray50", outline="")
+        canvas.create_rectangle(0, 0, int(width * 0.36), height, fill="#050B16", stipple="gray25", outline="")
+        canvas.create_rectangle(0, 0, width - 1, height - 1, outline=palette["accent"], width=1)
+
+        emblem_size = min(178, max(140, int(height * 0.70)))
+        emblem_x = 32
+        emblem_y = max(18, (height - emblem_size) // 2)
+        emblem = self.images.get(
+            YUGEN_EMBLEM_PATH,
+            (emblem_size, emblem_size),
+            "contain",
+            trim=True,
+        )
+        if emblem is not None:
+            self.yugen_photo_refs["header_emblem"] = emblem
+            canvas.create_image(emblem_x, emblem_y, image=emblem, anchor="nw")
+
+        plaque_height = min(height - 36, 198)
+        plaque = self.images.get(
+            YUGEN_PLAQUE_PATH,
+            (64, plaque_height),
+            "contain",
+            trim=True,
+        )
+        if plaque is not None:
+            self.yugen_photo_refs["header_plaque"] = plaque
+            canvas.create_image(width - 78, (height - plaque_height) // 2, image=plaque, anchor="nw")
+
+        text_x = emblem_x + emblem_size + 40
+        title_y = max(36, int(height * 0.24))
+        equalizer_has_pixels = True
+        if Image is not None:
+            prepared_equalizer = self.images._prepare_image(YUGEN_HEADER_EQUALIZER_PATH, True)
+            equalizer_has_pixels = (
+                prepared_equalizer is not None
+                and prepared_equalizer.getchannel("A").getbbox() is not None
             )
-            if index % 5 == 0:
-                canvas.create_oval(
-                    x - 2,
-                    top - 8,
-                    x + 5,
-                    top - 1,
-                    fill=palette["glow"],
+        equalizer = self.images.get(
+            YUGEN_HEADER_EQUALIZER_PATH,
+            (300, 38),
+            "contain",
+            trim=True,
+        ) if equalizer_has_pixels else None
+        if equalizer is not None:
+            self.yugen_photo_refs["header_equalizer"] = equalizer
+            canvas.create_image(text_x, title_y + 126, image=equalizer, anchor="nw")
+        else:
+            self._draw_header_equalizer(canvas, text_x, title_y + 132, palette)
+
+        canvas.create_text(
+            text_x,
+            title_y,
+            text="Yūgen Audio",
+            fill=palette["foreground"],
+            font=(self.ui_font_family, 40, "bold"),
+            anchor="nw",
+        )
+        canvas.create_text(
+            text_x + 10,
+            title_y + 54,
+            text="Music Downloader",
+            fill=palette["accent"],
+            font=(self.ui_font_family, 20, "bold"),
+            anchor="nw",
+        )
+        canvas.create_text(
+            text_x + 10,
+            title_y + 92,
+            text=APP_TAGLINE,
+            fill=palette["muted"],
+            font=(self.ui_font_family, 12),
+            anchor="nw",
+        )
+
+    def _draw_header_equalizer(self, canvas: tk.Canvas, x: int, y: int, palette: dict[str, str]) -> None:
+        """Dibuja una línea decorativa mínima si el PNG del ecualizador está vacío."""
+        line_width = 260
+        canvas.create_line(x, y, x + line_width, y, fill=palette["accent"], width=1)
+        for offset in (78, 142, 198):
+            canvas.create_oval(
+                x + offset - 2,
+                y - 2,
+                x + offset + 2,
+                y + 2,
+                fill=palette["accent_2"],
+                outline="",
+            )
+        base_x = x + line_width + 10
+        for index, bar_height in enumerate((8, 13, 19, 26, 17, 11)):
+            bar_x = base_x + index * 6
+            canvas.create_rectangle(
+                bar_x,
+                y - bar_height // 2,
+                bar_x + 2,
+                y + bar_height // 2,
+                fill=palette["accent"],
+                outline="",
+            )
+
+    def _draw_sidebar(self) -> None:
+        """Coloca la decoración vertical de olas en la barra lateral."""
+        canvas = self.sidebar_canvas
+        if canvas is None:
+            return
+        palette = THEME_PALETTES.get(self.theme_value.get(), THEME_PALETTES["dark"])
+        width = max(canvas.winfo_width(), 80)
+        height = max(canvas.winfo_height(), 160)
+        canvas.delete("all")
+        canvas.configure(background=palette["background"])
+        waves = self.images.get(
+            YUGEN_SIDEBAR_WAVES_PATH,
+            (width, height),
+            "cover",
+            anchor="bottom",
+            trim=True,
+        )
+        if waves is not None:
+            self.yugen_photo_refs["sidebar_waves"] = waves
+            canvas.create_image(0, 0, image=waves, anchor="nw")
+        canvas.create_oval(
+            width // 2 - 5,
+            height - 30,
+            width // 2 + 5,
+            height - 20,
+            fill=palette["accent"],
+            outline="",
+        )
+
+    def _draw_yugen_progress(self) -> None:
+        """Pinta la barra de progreso con textura de pincelada azul."""
+        canvas = self.progress_canvas
+        if canvas is None:
+            return
+        palette = THEME_PALETTES.get(self.theme_value.get(), THEME_PALETTES["dark"])
+        width = max(canvas.winfo_width(), 260)
+        height = max(canvas.winfo_height(), 26)
+        canvas.delete("all")
+        canvas.configure(background=palette["panel"], highlightbackground=palette["border"])
+        pad = 3
+        canvas.create_rectangle(
+            pad,
+            pad,
+            width - pad,
+            height - pad,
+            outline=palette["border"],
+            fill=palette["background"],
+        )
+        ratio = max(0.0, min(1.0, self.progress_percentage / 100.0))
+        bar_width = width - pad * 2
+        bar_height = height - pad * 2
+
+        if self.progress_indeterminate_active:
+            segment_width = max(38, int(bar_width * 0.25))
+            travel = max(1, bar_width + segment_width)
+            left = pad + (self.progress_indeterminate_offset % travel) - segment_width
+            canvas.create_rectangle(
+                max(pad, left),
+                pad,
+                min(width - pad, left + segment_width),
+                height - pad,
+                fill=palette["accent_2"],
+                outline="",
+                stipple="gray50",
+            )
+        elif ratio > 0:
+            brush = self.images.crop_width(
+                YUGEN_PROGRESS_BRUSH_PATH,
+                (bar_width, bar_height),
+                ratio,
+                trim=True,
+            )
+            if brush is not None:
+                self.yugen_photo_refs["progress_brush"] = brush
+                canvas.create_image(pad, pad, image=brush, anchor="nw")
+            else:
+                fill_width = max(1, int(bar_width * ratio))
+                canvas.create_rectangle(
+                    pad,
+                    pad,
+                    pad + fill_width,
+                    height - pad,
+                    fill=palette["accent_2"],
                     outline="",
                 )
 
-        canvas.create_text(
-            width - 22,
-            28,
-            text="♪",
-            fill=palette["accent"],
-            font=("TkDefaultFont", 24, "bold"),
+    def _animate_progress_to_target(self) -> None:
+        """Suaviza visualmente el avance sin inventar porcentajes reales."""
+        self.progress_animation_job = None
+        delta = self.progress_target_percentage - self.progress_percentage
+        if abs(delta) <= 0.35:
+            self.progress_percentage = self.progress_target_percentage
+            self._draw_yugen_progress()
+            return
+
+        self.progress_percentage += delta * 0.35
+        self._draw_yugen_progress()
+        try:
+            self.progress_animation_job = self.root.after(
+                16,
+                self._animate_progress_to_target,
+            )
+        except tk.TclError:
+            self.progress_animation_job = None
+
+    def _start_progress_animation(self) -> None:
+        """Arranca la animación determinada si no hay una pendiente."""
+        if self.progress_animation_job is None:
+            self._animate_progress_to_target()
+
+    def _animate_indeterminate_progress(self) -> None:
+        """Mueve una franja discreta cuando yt-dlp aún no reporta porcentaje."""
+        if not self.progress_indeterminate_active:
+            return
+        self.progress_indeterminate_offset += 10
+        self._draw_yugen_progress()
+        try:
+            self.root.after(55, self._animate_indeterminate_progress)
+        except tk.TclError:
+            self.progress_indeterminate_active = False
+
+    def _refresh_static_yugen_images(self) -> None:
+        """Carga imágenes pequeñas que no dependen del tamaño de ventana."""
+        download_icon = self.images.get(
+            YUGEN_DOWNLOAD_BUTTON_PATH,
+            (112, 112),
+            "contain",
+            trim=True,
+        )
+        if download_icon is not None:
+            self.yugen_photo_refs["download_button"] = download_icon
+            self.download_icon_label.configure(image=download_icon)
+
+        placeholder = self.images.get(
+            YUGEN_CONCERT_PLACEHOLDER_PATH,
+            (268, 201),
+            "cover",
+        )
+        if placeholder is not None and self.thumbnail_label is not None:
+            self.yugen_photo_refs["concert_placeholder"] = placeholder
+            self.thumbnail_label.configure(image=placeholder)
+
+        self._refresh_details_decoration()
+
+    def _schedule_details_decoration_refresh(
+        self,
+        _event: tk.Event | None = None,
+    ) -> None:
+        """Recalcula la decoración con debounce al cambiar tamaño del panel."""
+        if self.details_decoration_resize_job is not None:
+            try:
+                self.root.after_cancel(self.details_decoration_resize_job)
+            except tk.TclError:
+                pass
+        try:
+            self.details_decoration_resize_job = self.root.after(
+                80,
+                self._refresh_details_decoration,
+            )
+        except tk.TclError:
+            self.details_decoration_resize_job = None
+
+    def _refresh_details_decoration(self) -> None:
+        """Mantiene la decoración pegada abajo/derecha sin afectar el layout."""
+        if self.details_panel is None or self.details_decoration_label is None:
+            return
+
+        try:
+            panel_width = max(1, self.details_panel.winfo_width())
+            panel_height = max(1, self.details_panel.winfo_height())
+        except tk.TclError:
+            return
+
+        prepared = self.images._prepare_image(YUGEN_DETAILS_DECORATION_PATH, True)
+        if prepared is None:
+            return
+
+        source_width, source_height = prepared.size
+        if source_width <= 0 or source_height <= 0:
+            return
+
+        target_width = max(180, min(340, int(panel_width * 0.38)))
+        max_height = max(48, int(panel_height * 0.30))
+        target_height = max(1, int(source_height * target_width / source_width))
+        if target_height > max_height:
+            target_height = max_height
+            target_width = max(1, int(source_width * target_height / source_height))
+
+        decoration = self.images.get(
+            YUGEN_DETAILS_DECORATION_PATH,
+            (target_width, target_height),
+            "contain",
+            trim=True,
+        )
+        if decoration is None:
+            return
+
+        self.yugen_photo_refs["details_decoration"] = decoration
+        self.details_decoration_label.configure(image=decoration)
+        self.details_decoration_label.place_configure(
+            relx=1.0,
+            rely=1.0,
+            anchor="se",
+            x=-2,
+            y=-2,
+        )
+        self.details_decoration_resize_job = None
+
+    def _scroll_to_top(self) -> None:
+        """Mueve el scroll a la descarga sin cambiar estado de la app."""
+        self.main_canvas.yview_moveto(0.0)
+
+    def _scroll_to_history(self) -> None:
+        """Mueve el scroll hacia el historial si el canvas ya está listo."""
+        try:
+            self.history_frame.update_idletasks()
+            y = self.history_frame.winfo_y()
+            total = max(1, self.main_container.winfo_height())
+            self.main_canvas.yview_moveto(min(1.0, y / total))
+        except tk.TclError:
+            self.main_canvas.yview_moveto(1.0)
+
+    def _show_settings_info(self) -> None:
+        """Acceso lateral simple a opciones que siguen estando en el menú."""
+        messagebox.showinfo(
+            "Ajustes",
+            "Las herramientas, el tema, actualizaciones y registros están en el menú Herramientas/Ayuda.",
+            parent=self.root,
         )
 
     def _update_main_scroll_region(self, _event: tk.Event | None = None) -> None:
@@ -1090,6 +1760,14 @@ class KenjiMusicDownloaderGUI:
         )
         self.style.configure("Root.TFrame", background=palette["background"])
         self.style.configure("Main.TFrame", background=palette["background"])
+        self.style.configure("Sidebar.TFrame", background=palette["background"])
+        self.style.configure("SidebarIcon.TLabel", background=palette["background"], foreground=palette["foreground"], font=(font_family, 20, "bold"))
+        self.style.configure("SidebarFooter.TLabel", background=palette["background"], foreground=palette["muted"], font=(font_family, 10, "bold"), justify="center")
+        self.style.configure("DownloadCard.TFrame", background=palette["panel"], borderwidth=1, relief="solid")
+        self.style.configure("DownloadCard.TLabel", background=palette["panel"])
+        self.style.configure("MediaCard.TFrame", background=palette["panel"], borderwidth=1, relief="solid")
+        self.style.configure("MediaCard.TLabel", background=palette["panel"])
+        self.style.configure("Decoration.TLabel", background=palette["surface"])
         self.style.configure(
             "Header.TFrame",
             background=palette["surface"],
@@ -1185,6 +1863,19 @@ class KenjiMusicDownloaderGUI:
             font=section_font,
         )
         self.style.configure(
+            YUGEN_CARD_STYLE,
+            background=palette["surface"],
+            bordercolor=palette["border"],
+            lightcolor=palette["accent"],
+            darkcolor=palette["border"],
+        )
+        self.style.configure(
+            YUGEN_CARD_LABEL_STYLE,
+            background=palette["surface"],
+            foreground=palette["accent"],
+            font=(font_family, 10, "bold"),
+        )
+        self.style.configure(
             "TButton",
             padding=(7, 3),
             background=palette["surface"],
@@ -1213,6 +1904,34 @@ class KenjiMusicDownloaderGUI:
                 ("disabled", palette["surface"]),
             ],
             foreground=[("disabled", palette["muted"])],
+        )
+        self.style.configure(
+            SIDEBAR_BUTTON_STYLE,
+            padding=(6, 8),
+            background=palette["background"],
+            foreground=palette["muted"],
+            bordercolor=palette["border"],
+            font=(font_family, 10, "bold"),
+            justify="center",
+        )
+        self.style.map(
+            SIDEBAR_BUTTON_STYLE,
+            background=[("active", palette["selected"])],
+            foreground=[("active", palette["foreground"])],
+        )
+        self.style.configure(
+            SIDEBAR_ACTIVE_BUTTON_STYLE,
+            padding=(6, 8),
+            background=palette["selected"],
+            foreground=palette["foreground"],
+            bordercolor=palette["accent"],
+            font=(font_family, 10, "bold"),
+            justify="center",
+        )
+        self.style.map(
+            SIDEBAR_ACTIVE_BUTTON_STYLE,
+            background=[("active", palette["selected"])],
+            foreground=[("active", palette["accent"])],
         )
         self.style.configure(
             PRIMARY_BUTTON_STYLE,
@@ -1316,8 +2035,13 @@ class KenjiMusicDownloaderGUI:
         self.history_tree.tag_configure("cancelled", foreground=palette["muted"])
         self.history_tree.tag_configure("error", foreground=error_color)
 
-        if self.header_decoration_canvas is not None:
+        if self.header_canvas is not None:
             self._draw_header_decoration()
+        if self.sidebar_canvas is not None:
+            self._draw_sidebar()
+        if self.progress_canvas is not None:
+            self._draw_yugen_progress()
+        self._refresh_static_yugen_images()
 
         if self.support_dialog and self.support_dialog.winfo_exists():
             self.support_dialog.configure(background=palette["background"])
@@ -1333,16 +2057,18 @@ class KenjiMusicDownloaderGUI:
 
         for index, entry in enumerate(self.history_entries):
             item_id = f"history-{index}"
+            folder = str(Path(entry.path).parent) if entry.path else "—"
             self.history_tree.insert(
                 "",
                 "end",
                 iid=item_id,
                 values=(
+                    index + 1,
                     entry.name,
                     entry.output_format,
                     entry.quality,
                     entry.status_label,
-                    entry.path or "—",
+                    folder,
                 ),
                 tags=(entry.status,),
             )
@@ -2845,17 +3571,35 @@ class KenjiMusicDownloaderGUI:
                 self.progress_bar.configure(mode="indeterminate")
                 self.progress_bar.start(12)
                 self.progress_is_indeterminate = True
+                self.progress_indeterminate_active = True
+                self.progress_indeterminate_offset = 0
+                self._animate_indeterminate_progress()
             self.percentage_value.set("—")
+            self.progress_percentage = 0.0
+            self._draw_yugen_progress()
             return
 
         if self.progress_is_indeterminate:
             self.progress_bar.stop()
             self.progress_bar.configure(mode="determinate")
             self.progress_is_indeterminate = False
+        self.progress_indeterminate_active = False
 
         bounded_percentage = max(0.0, min(100.0, percentage))
         self.progress_bar["value"] = bounded_percentage
         self.percentage_value.set(f"{bounded_percentage:.0f} %")
+        self.progress_target_percentage = bounded_percentage
+        if bounded_percentage <= 0:
+            if self.progress_animation_job is not None:
+                try:
+                    self.root.after_cancel(self.progress_animation_job)
+                except tk.TclError:
+                    pass
+                self.progress_animation_job = None
+            self.progress_percentage = 0.0
+            self._draw_yugen_progress()
+            return
+        self._start_progress_animation()
 
     def _finish_success(self, output_path: Path) -> None:
         """Restaura la ventana e informa dónde quedó el MP3."""

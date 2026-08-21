@@ -1,4 +1,4 @@
-"""Interfaz mínima por consola de Kenji Music Downloader."""
+"""Interfaz mínima por consola de Yūgen Audio."""
 
 from time import perf_counter
 

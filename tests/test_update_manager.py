@@ -17,6 +17,7 @@ from src.update_manager import (
     UpdatePackage,
     UpdatePackageError,
     detect_platform_key,
+    detect_installation_context,
     download_update,
     ensure_installation_writable,
     launch_update_installer,
@@ -105,6 +106,7 @@ class AssetSelectionTests(UpdateManagerTestCase):
                 "windows-x64": {
                     "name": windows_name,
                     "sha256": "a" * 64,
+                    "size": 100,
                 }
             },
             "notes": "Notas del manifest",
@@ -124,7 +126,34 @@ class AssetSelectionTests(UpdateManagerTestCase):
         )
 
         self.assertEqual(package.expected_sha256, "a" * 64)
+        self.assertEqual(package.expected_size, 100)
         self.assertEqual(package.notes, "Notas del manifest")
+
+    def test_manifest_rejects_asset_size_mismatch(self) -> None:
+        windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
+        manifest = {
+            "version": "1.0.4",
+            "assets": {
+                "windows-x64": {
+                    "name": windows_name,
+                    "sha256": "a" * 64,
+                    "size": 101,
+                }
+            },
+        }
+
+        with self.assertRaisesRegex(UpdatePackageError, "tamaño"):
+            prepare_update_package(
+                make_result(
+                    make_asset(windows_name, size=100),
+                    make_asset("update.json"),
+                ),
+                "Windows",
+                "AMD64",
+                opener=lambda _request, timeout: FakeResponse(
+                    json.dumps(manifest).encode("utf-8")
+                ),
+            )
 
     def test_falls_back_to_windows_specific_manifest(self) -> None:
         windows_name = "KenjiMusicDownloader-v1.0.4-Windows-x64.zip"
@@ -338,6 +367,28 @@ class UpdateDownloadTests(UpdateManagerTestCase):
                     package,
                     opener=lambda _request, timeout: FakeResponse(b"contenido distinto"),
                     updates_directory=directory,
+            )
+            self.assertEqual(list(directory.iterdir()), [])
+
+    def test_size_mismatch_removes_partial_download(self) -> None:
+        content = b"contenido"
+        expected_hash = hashlib.sha256(content).hexdigest()
+        asset = make_asset("KenjiMusicDownloader-v1.0.4-Windows-x64.zip")
+        package = UpdatePackage(
+            "1.0.4",
+            "windows-x64",
+            asset,
+            "zip",
+            expected_hash,
+            len(content) + 1,
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            directory = Path(temporary_directory)
+            with self.assertRaises(UpdateIntegrityError):
+                download_update(
+                    package,
+                    opener=lambda _request, timeout: FakeResponse(content),
+                    updates_directory=directory,
                 )
             self.assertEqual(list(directory.iterdir()), [])
 
@@ -359,6 +410,35 @@ class UpdateDownloadTests(UpdateManagerTestCase):
 
 
 class InstallerLaunchTests(UpdateManagerTestCase):
+    def test_appimage_context_finds_helper_next_to_pyinstaller_binary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            appimage = root / "YugenAudio.AppImage"
+            appimage.write_bytes(b"appimage")
+            executable_directory = root / "AppDir" / "usr" / "bin" / "YugenAudio"
+            executable_directory.mkdir(parents=True)
+            main = executable_directory / "YugenAudio"
+            helper = executable_directory / "YugenAudioUpdateInstaller"
+            main.write_bytes(b"main")
+            helper.write_bytes(b"helper")
+
+            with (
+                patch.dict(
+                    "src.update_manager.os.environ",
+                    {"APPIMAGE": str(appimage)},
+                ),
+                patch("src.update_manager.platform.system", return_value="Linux"),
+                patch("src.update_manager.platform.machine", return_value="x86_64"),
+                patch("src.update_manager.sys.executable", str(main)),
+                patch("src.update_manager.sys.frozen", True, create=True),
+            ):
+                context = detect_installation_context()
+
+            self.assertEqual(context.mode, "appimage")
+            self.assertEqual(context.main_executable, appimage.resolve())
+            self.assertEqual(context.helper_executable, helper.resolve())
+            self.assertTrue(context.supported)
+
     def test_insufficient_permissions_are_reported(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             invalid_directory = Path(temporary_directory) / "archivo"

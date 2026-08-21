@@ -110,8 +110,25 @@ class BackupRollbackTests(unittest.TestCase):
             internal.mkdir()
             (internal / "python312.dll").write_bytes(b"dll")
             (internal / "base_library.zip").write_bytes(b"zip")
+            tools = payload / "tools"
+            tools.mkdir()
+            (tools / "ffmpeg.exe").write_bytes(b"ffmpeg")
+            (tools / "ffprobe.exe").write_bytes(b"ffprobe")
+            (tools / "FFmpeg-LICENSE.txt").write_text("license", encoding="utf-8")
 
             validate_payload_files(payload, "KenjiMusicDownloader.exe")
+
+    def test_rejects_unexpected_packaged_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            payload = Path(temporary_directory)
+            (payload / "KenjiMusicDownloader.exe").write_bytes(b"main")
+            (payload / "KenjiUpdateInstaller.exe").write_bytes(b"helper")
+            tools = payload / "tools"
+            tools.mkdir()
+            (tools / "powershell.exe").write_bytes(b"no")
+
+            with self.assertRaisesRegex(UpdateInstallationFailure, "herramienta"):
+                validate_payload_files(payload, "KenjiMusicDownloader.exe")
 
     def test_rejects_development_files_in_update_payload(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

@@ -124,7 +124,7 @@ def _download_archive(
     """Descarga por HTTPS con límites para evitar archivos inesperadamente grandes."""
     request = Request(
         download_url,
-        headers={"User-Agent": "Kenji-Music-Downloader/1.0"},
+        headers={"User-Agent": "Yugen-Audio/1.0"},
     )
     _notify(status_callback, "Descargando FFmpeg…")
     with opener(request, timeout=FFMPEG_DOWNLOAD_TIMEOUT_SECONDS) as response:

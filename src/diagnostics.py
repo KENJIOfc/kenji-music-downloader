@@ -34,7 +34,7 @@ def check_internet_connection(timeout: float = 5.0) -> bool:
     """Comprueba una conexión HTTPS básica relevante para la aplicación."""
     request = Request(
         "https://www.youtube.com/generate_204",
-        headers={"User-Agent": "Kenji-Music-Downloader/1.0"},
+        headers={"User-Agent": "Yugen-Audio/1.0"},
     )
     try:
         with urlopen(request, timeout=timeout) as response:

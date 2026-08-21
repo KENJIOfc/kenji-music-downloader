@@ -5,9 +5,12 @@ import sys
 from tempfile import NamedTemporaryFile
 
 
-APP_NAME = "Kenji Music Downloader"
-APP_VERSION = "1.0.7"
-APP_DESCRIPTION = "Descarga y convierte audio de YouTube de forma sencilla y segura."
+APP_NAME = "Yūgen Audio"
+APP_FULL_NAME = "Yūgen Audio Music Downloader"
+APP_TECHNICAL_NAME = "YugenAudio"
+APP_VERSION = "1.0.8"
+APP_DESCRIPTION = "Music Downloader para descargar y convertir audio de YouTube de forma sencilla y segura."
+APP_TAGLINE = "幽玄の音、静かに響く。"
 SUPPORT_DISCORD_URL = "https://discordapp.com/users/649369933226180658"
 
 # Opciones internas de red. No provienen de la entrada del usuario.
@@ -39,6 +42,7 @@ def _get_resource_directory() -> Path:
 
 RESOURCE_DIRECTORY = _get_resource_directory()
 ASSETS_DIRECTORY = RESOURCE_DIRECTORY / "assets"
+YUGEN_ASSETS_DIRECTORY = ASSETS_DIRECTORY / "yugen"
 LOGO_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main.png"
 LOGO_HEADER_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main_header.png"
 TASKBAR_ICON_IMAGE_PATH = ASSETS_DIRECTORY / "logo_main.png"
@@ -49,6 +53,18 @@ UPDATE_INSTALLER_ICON_PREVIEW_PATH = ASSETS_DIRECTORY / "updater_logo_icon.png"
 UPDATE_INSTALLER_ICON_PATH = ASSETS_DIRECTORY / "updater_logo.ico"
 TYPOGRAPHY_REFERENCE_IMAGE_PATH = ASSETS_DIRECTORY / "typography_reference.png"
 INTERFACE_REFERENCE_IMAGE_PATH = ASSETS_DIRECTORY / "interface_reference_new.png"
+YUGEN_HERO_BANNER_PATH = YUGEN_ASSETS_DIRECTORY / "hero_banner.png"
+YUGEN_EMBLEM_PATH = YUGEN_ASSETS_DIRECTORY / "yugen_emblem.png"
+YUGEN_PLAQUE_PATH = YUGEN_ASSETS_DIRECTORY / "japanese_plaque.png"
+YUGEN_HEADER_EQUALIZER_PATH = YUGEN_ASSETS_DIRECTORY / "header_equalizer.png"
+YUGEN_DOWNLOAD_BUTTON_PATH = YUGEN_ASSETS_DIRECTORY / "download_button.png"
+YUGEN_PROGRESS_BRUSH_PATH = YUGEN_ASSETS_DIRECTORY / "progress_brush.png"
+YUGEN_CONCERT_PLACEHOLDER_PATH = YUGEN_ASSETS_DIRECTORY / "concert_placeholder.png"
+YUGEN_DETAILS_DECORATION_PATH = YUGEN_ASSETS_DIRECTORY / "details_decoration_simple.png"
+YUGEN_SIDEBAR_WAVES_PATH = YUGEN_ASSETS_DIRECTORY / "sidebar_waves.png"
+YUGEN_INTERFACE_REFERENCE_PATH = YUGEN_ASSETS_DIRECTORY / "interface_reference.png"
+YUGEN_WINDOW_ICON_PREVIEW_PATH = YUGEN_ASSETS_DIRECTORY / "yugen_audio_icon.png"
+YUGEN_WINDOW_ICON_PATH = YUGEN_ASSETS_DIRECTORY / "yugen_audio.ico"
 
 
 class ConfigurationError(RuntimeError):

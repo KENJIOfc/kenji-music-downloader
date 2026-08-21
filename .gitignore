@@ -38,6 +38,13 @@ build/
 dist/
 _backups/
 
+# Paquetes binarios generados para GitHub Releases
+release/windows/*.zip
+release/windows/*.exe
+release/linux/*.AppImage
+release/linux/*.tar.gz
+release/linux/*.deb
+
 # Configuración de editores y sistema operativo
 .idea/
 .vscode/
